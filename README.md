@@ -1,6 +1,6 @@
 # τ
 
-![tau thumbnail](assets/thumbnail.png)
+![tau demo](assets/demo.gif)
 
 minimal rust coding-agent harness
 
@@ -17,5 +17,3 @@ cargo run --bin tau-install
 3. harness reads `AGENTS.md`
 
 4. dev/testing workflow is `cargo fmt --check && cargo test && cargo clippy --all-targets --all-features -- -D warnings`
-
-![tau demo](assets/demo.gif)

@@ -183,15 +183,6 @@ impl TauConfig {
                 .map_err(|err| errors::parse_config(&yaml_path, err));
         }
 
-        let toml_path = tau_dir.join("config.toml");
-        if toml_path.exists() {
-            let content = tokio::fs::read_to_string(&toml_path).await?;
-            let config =
-                toml::from_str(&content).map_err(|err| errors::parse_config(&toml_path, err))?;
-            write_default_config_yaml(&yaml_path).await?;
-            return Ok(config);
-        }
-
         write_default_config_yaml(&yaml_path).await?;
         Ok(Self::default_config())
     }
