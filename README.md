@@ -1,5 +1,7 @@
 # tau
 
+![tau thumbnail](assets/thumbnail.gif)
+
 Minimal Rust coding-agent harness with JSONL sessions, local tools, multiple providers, and an optional TUI.
 
 ## Install
