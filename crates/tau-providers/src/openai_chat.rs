@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use tau_llm::{
     ContentBlock, Provider, ProviderRequest, ProviderStream, Role, StreamEvent, ToolCall,
 };
-use tokio::time::{sleep, Duration};
 use tokio_util::sync::CancellationToken;
 
 pub struct OpenAiChatProvider {
@@ -28,11 +27,18 @@ impl OpenAiChatProvider {
     }
 
     pub fn new(api_key: String, model: Option<String>, base_url: Option<String>) -> Self {
+        let base_url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+        let client = if base_url.contains("z.ai") {
+            reqwest::Client::builder().http1_only().build()
+        } else {
+            reqwest::Client::builder().build()
+        }
+        .expect("reqwest client builder succeeds");
         Self {
             api_key,
             model: model.unwrap_or_else(|| "gpt-4o".to_string()),
-            base_url: base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
-            client: reqwest::Client::new(),
+            base_url,
+            client,
         }
     }
 }
@@ -79,7 +85,14 @@ impl Provider for OpenAiChatProvider {
             );
         }
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
-        let response = send_with_transient_retry(&self.client, &url, &self.api_key, &body).await?;
+        let response = self
+            .client
+            .post(url)
+            .bearer_auth(&self.api_key)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
@@ -109,40 +122,6 @@ impl Provider for OpenAiChatProvider {
         };
         Ok(Box::pin(stream))
     }
-}
-
-async fn send_with_transient_retry(
-    client: &reqwest::Client,
-    url: &str,
-    api_key: &str,
-    body: &Value,
-) -> anyhow::Result<reqwest::Response> {
-    let mut attempt = 0;
-    loop {
-        match client
-            .post(url)
-            .bearer_auth(api_key)
-            .header("content-type", "application/json")
-            .json(body)
-            .send()
-            .await
-        {
-            Ok(response) => return Ok(response),
-            Err(err) if attempt == 0 && is_transient_send_error(&err) => {
-                attempt += 1;
-                sleep(Duration::from_millis(250)).await;
-            }
-            Err(err) => return Err(err.into()),
-        }
-    }
-}
-
-fn is_transient_send_error(err: &reqwest::Error) -> bool {
-    if err.is_timeout() || err.is_connect() {
-        return true;
-    }
-    err.to_string()
-        .contains("connection closed before message completed")
 }
 
 pub fn parse_openai_chat_sse(input: &str) -> anyhow::Result<Vec<StreamEvent>> {
