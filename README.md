@@ -1,6 +1,6 @@
 # τ
 
-![tau demo](assets/demo.gif)
+![tau demo](assets/tau-demo.gif)
 
 minimal rust coding-agent harness
 
