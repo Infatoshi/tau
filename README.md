@@ -17,12 +17,12 @@ Open a new shell, then run `tau` from anywhere.
 
 ## Configure
 
-Create/edit `~/.tau/config.toml`:
+The first `tau` run creates `~/.tau/config.yaml`:
 
-```toml
-provider = "zai"
-default_model = "glm-5.1"
-sandbox_mode = "yolo"
+```yaml
+provider: zai
+default_model: glm-5.1
+sandbox_mode: yolo
 ```
 
 Put API keys in your shell environment, a project `.env`, or `~/.tau/.env`.

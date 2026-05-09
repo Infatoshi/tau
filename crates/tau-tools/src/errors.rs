@@ -3,7 +3,7 @@ use tau_core::ToolResult;
 
 pub fn blocked_by_sandbox() -> ToolResult {
     tool_error(
-        "tool blocked by sandbox_mode; set sandbox_mode = \"yolo\" in ~/.tau/config.toml to allow write/edit/bash",
+        "tool blocked by sandbox_mode; set sandbox_mode: yolo in ~/.tau/config.yaml to allow write/edit/bash",
     )
 }
 

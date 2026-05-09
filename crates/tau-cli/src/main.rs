@@ -172,13 +172,49 @@ impl TauConfig {
         let Some(home) = dirs::home_dir() else {
             return Ok(Self::default());
         };
-        let path = home.join(".tau").join("config.toml");
-        if !path.exists() {
-            return Ok(Self::default());
+        let tau_dir = home.join(".tau");
+        tokio::fs::create_dir_all(&tau_dir).await?;
+        tokio::fs::create_dir_all(tau_dir.join("sessions")).await?;
+
+        let yaml_path = tau_dir.join("config.yaml");
+        if yaml_path.exists() {
+            let content = tokio::fs::read_to_string(&yaml_path).await?;
+            return serde_yaml::from_str(&content)
+                .map_err(|err| errors::parse_config(&yaml_path, err));
         }
-        let content = tokio::fs::read_to_string(&path).await?;
-        toml::from_str(&content).map_err(|err| errors::parse_config(&path, err))
+
+        let toml_path = tau_dir.join("config.toml");
+        if toml_path.exists() {
+            let content = tokio::fs::read_to_string(&toml_path).await?;
+            let config =
+                toml::from_str(&content).map_err(|err| errors::parse_config(&toml_path, err))?;
+            write_default_config_yaml(&yaml_path).await?;
+            return Ok(config);
+        }
+
+        write_default_config_yaml(&yaml_path).await?;
+        Ok(Self::default_config())
     }
+
+    fn default_config() -> Self {
+        Self {
+            provider: Some(ProviderKind::Zai),
+            default_model: Some(DEFAULT_ZAI_MODEL.to_string()),
+            sandbox_mode: Some("yolo".to_string()),
+        }
+    }
+}
+
+async fn write_default_config_yaml(path: &Path) -> anyhow::Result<()> {
+    tokio::fs::write(
+        path,
+        format!(
+            "provider: zai\ndefault_model: {}\nsandbox_mode: yolo\n",
+            DEFAULT_ZAI_MODEL
+        ),
+    )
+    .await?;
+    Ok(())
 }
 
 fn selected_model(cli: &Cli, config: &TauConfig, provider: ProviderKind) -> String {

@@ -34,12 +34,12 @@ Project-specific harness instructions are read from the current working director
 - `CLAUDE.md` is used only when `AGENTS.md` is absent.
 - If both exist, only `AGENTS.md` is injected into the tau system prompt.
 
-`~/.tau/config.toml` may set:
+On first run tau creates `~/.tau/config.yaml`. Existing `~/.tau/config.toml` remains supported as a fallback, but new config should use YAML:
 
-```toml
-provider = "zai"
-default_model = "glm-5.1"
-sandbox_mode = "yolo"
+```yaml
+provider: zai
+default_model: glm-5.1
+sandbox_mode: yolo
 ```
 
 CLI flags override config values. `sandbox_mode = "yolo"` allows `bash`, `edit`, and `write`; other values keep those risky tools blocked. `read` remains available.
