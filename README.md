@@ -7,7 +7,7 @@ minimal rust coding-agent harness
 ## install
 
 ```sh
-./scripts/install.sh
+cargo run --bin tau-install
 ```
 
 ![tau demo](assets/demo.gif)
