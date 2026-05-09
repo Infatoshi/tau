@@ -1,3 +1,4 @@
+use crate::errors;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -102,7 +103,7 @@ impl SessionStore {
                 SessionEvent::Session { id, .. } => Some(*id),
                 _ => None,
             })
-            .ok_or_else(|| anyhow::anyhow!("session missing header"))?;
+            .ok_or_else(errors::session_missing_header)?;
         let file = OpenOptions::new().append(true).open(&path).await?;
         Ok((Self { id, path, file }, events))
     }
@@ -252,7 +253,7 @@ fn preview(text: &str, max_chars: usize) -> String {
 }
 
 fn sessions_dir() -> anyhow::Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("could not find home directory"))?;
+    let home = dirs::home_dir().ok_or_else(errors::missing_home_dir)?;
     Ok(home.join(".tau").join("sessions"))
 }
 
@@ -270,9 +271,9 @@ async fn resolve_hash(hash: &str) -> anyhow::Result<PathBuf> {
         }
     }
     match matches.len() {
-        0 => Err(anyhow::anyhow!("no session matches {hash}")),
+        0 => Err(errors::no_session_matches(hash)),
         1 => Ok(matches.remove(0)),
-        _ => Err(anyhow::anyhow!("ambiguous session hash {hash}")),
+        _ => Err(errors::ambiguous_session_hash(hash)),
     }
 }
 

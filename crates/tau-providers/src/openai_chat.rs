@@ -1,3 +1,4 @@
+use crate::errors;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use serde::Deserialize;
@@ -22,7 +23,7 @@ impl OpenAiChatProvider {
         } else {
             std::env::var("OPENAI_API_KEY").or_else(|_| std::env::var("ZAI_API_KEY"))
         }
-        .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY or ZAI_API_KEY is required"))?;
+        .map_err(|_| errors::missing_any_env(&["OPENAI_API_KEY", "ZAI_API_KEY"]))?;
         Ok(Self::new(api_key, model, base_url))
     }
 
@@ -96,8 +97,10 @@ impl Provider for OpenAiChatProvider {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "OpenAI Chat Completions request failed: {status} {text}"
+            return Err(errors::request_failed(
+                "OpenAI Chat Completions",
+                status,
+                text,
             ));
         }
         let byte_stream = response.bytes_stream();

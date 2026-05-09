@@ -1,4 +1,5 @@
 use crate::display::AgentDisplay;
+use crate::errors;
 use crate::session::{events_to_messages, SessionEvent, SessionStore};
 use crate::tool::Tool;
 use chrono::Utc;
@@ -93,7 +94,7 @@ impl Agent {
 
             while let Some(event) = stream.next().await {
                 if cancellation.is_cancelled() {
-                    return Err(anyhow::anyhow!("cancelled"));
+                    return Err(errors::cancelled());
                 }
                 match event? {
                     StreamEvent::MessageStart => {}
@@ -122,7 +123,7 @@ impl Agent {
                     StreamEvent::MessageStop {
                         stop_reason: reason,
                     } => stop_reason = reason,
-                    StreamEvent::Error { message } => return Err(anyhow::anyhow!(message)),
+                    StreamEvent::Error { message } => return Err(errors::provider_error(message)),
                 }
             }
 
@@ -210,19 +211,17 @@ impl Agent {
         let mut summary = String::new();
         while let Some(event) = stream.next().await {
             if cancellation.is_cancelled() {
-                return Err(anyhow::anyhow!("cancelled"));
+                return Err(errors::cancelled());
             }
             match event? {
                 StreamEvent::TextDelta { text } => summary.push_str(&text),
-                StreamEvent::Error { message } => return Err(anyhow::anyhow!(message)),
+                StreamEvent::Error { message } => return Err(errors::provider_error(message)),
                 _ => {}
             }
         }
         let summary = summary.trim().to_string();
         if summary.is_empty() {
-            return Err(anyhow::anyhow!(
-                "provider returned an empty compaction summary"
-            ));
+            return Err(errors::empty_compaction_summary());
         }
         session
             .append(&SessionEvent::Compact {

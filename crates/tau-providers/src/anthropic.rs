@@ -1,3 +1,4 @@
+use crate::errors;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use serde::Deserialize;
@@ -16,7 +17,7 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     pub fn from_env() -> anyhow::Result<Self> {
         let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| anyhow::anyhow!("ANTHROPIC_API_KEY is required"))?;
+            .map_err(|_| errors::missing_env("ANTHROPIC_API_KEY"))?;
         Ok(Self {
             api_key,
             client: reqwest::Client::new(),
@@ -51,7 +52,7 @@ impl Provider for AnthropicProvider {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Anthropic request failed: {status} {text}"));
+            return Err(errors::request_failed("Anthropic", status, text));
         }
         let byte_stream = response.bytes_stream();
         let stream = async_stream::try_stream! {

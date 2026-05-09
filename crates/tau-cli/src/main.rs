@@ -15,6 +15,8 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+mod errors;
+
 const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-5";
 const DEFAULT_OPENAI_RESPONSES_MODEL: &str = "gpt-5";
 const DEFAULT_OPENAI_CHAT_MODEL: &str = "gpt-4o";
@@ -175,7 +177,7 @@ impl TauConfig {
             return Ok(Self::default());
         }
         let content = tokio::fs::read_to_string(&path).await?;
-        toml::from_str(&content).map_err(|err| anyhow::anyhow!("parse {}: {err}", path.display()))
+        toml::from_str(&content).map_err(|err| errors::parse_config(&path, err))
     }
 }
 
@@ -307,7 +309,7 @@ fn read_api_key(env_vars: &[&str]) -> anyhow::Result<String> {
             return Ok(value);
         }
     }
-    Err(anyhow::anyhow!("{} is required", env_vars.join(" or ")))
+    Err(errors::missing_any_env(env_vars))
 }
 
 fn build_agent(
@@ -839,7 +841,7 @@ fn init_logging() -> anyhow::Result<()> {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .try_init()
-        .map_err(|err| anyhow::anyhow!("initialize logging: {err}"))
+        .map_err(errors::init_logging)
 }
 
 fn install_single_cancel(cancellation: CancellationToken) {

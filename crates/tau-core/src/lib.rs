@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod display;
+mod errors;
 pub mod session;
 pub mod tool;
 

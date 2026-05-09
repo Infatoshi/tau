@@ -1,4 +1,6 @@
-use anyhow::{anyhow, Context};
+mod errors;
+
+use anyhow::Context;
 use async_trait::async_trait;
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
@@ -61,9 +63,7 @@ where
         cancellation: CancellationToken,
     ) -> anyhow::Result<ToolResult> {
         if self.mode != SandboxMode::Yolo {
-            return Ok(error_result(
-                "tool blocked by sandbox_mode; set sandbox_mode = \"yolo\" in ~/.tau/config.toml to allow write/edit/bash",
-            ));
+            return Ok(errors::blocked_by_sandbox());
         }
         self.inner.execute(input, cancellation).await
     }
@@ -103,10 +103,10 @@ impl Tool for ReadTool {
         let path = resolve_path(&self.cwd, &args.path);
         let meta = fs::metadata(&path).await?;
         if !meta.is_file() {
-            return Ok(error_result("not a regular file"));
+            return Ok(errors::not_regular_file());
         }
         if meta.len() > READ_LIMIT {
-            return Ok(error_result("file too large"));
+            return Ok(errors::file_too_large());
         }
         let content = fs::read_to_string(&path).await?;
         let content = match (args.start_line, args.end_line) {
@@ -207,13 +207,10 @@ impl Tool for EditTool {
         let path = resolve_path(&self.cwd, &args.path);
 
         if args.old_string.is_empty() {
-            return Ok(error_result("old_string must not be empty"));
+            return Ok(errors::empty_old_string());
         }
         if symlink_points_outside_cwd(&self.cwd, &path).await? {
-            return Ok(error_result(&format!(
-                "refusing to edit symlink outside cwd: {}",
-                path.display()
-            )));
+            return Ok(errors::symlink_outside_cwd(&path));
         }
 
         let bytes = fs::read(&path).await?;
@@ -227,17 +224,10 @@ impl Tool for EditTool {
         let occurrences = normalized_content.matches(&old_string).count();
 
         if occurrences == 0 {
-            return Ok(error_result(&format!(
-                "old_string not found in {}",
-                path.display()
-            )));
+            return Ok(errors::old_string_not_found(&path));
         }
         if !args.replace_all.unwrap_or(false) && occurrences > 1 {
-            return Ok(error_result(&format!(
-                "old_string is not unique in {} ({} occurrences). Provide more surrounding context or set replace_all=true.",
-                path.display(),
-                occurrences
-            )));
+            return Ok(errors::old_string_not_unique(&path, occurrences));
         }
 
         let replaced = if args.replace_all.unwrap_or(false) {
@@ -397,10 +387,7 @@ async fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
         fs::create_dir_all(parent).await?;
         let meta = fs::metadata(parent).await?;
         if !meta.is_dir() {
-            return Err(anyhow!(
-                "parent path is not a directory: {}",
-                parent.display()
-            ));
+            return Err(errors::parent_not_directory(parent));
         }
     }
     let tmp_path = temp_path(path);
@@ -485,11 +472,4 @@ fn slice_lines(content: &str, start: usize, end: Option<usize>) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn error_result(message: &str) -> ToolResult {
-    ToolResult {
-        content: message.to_string(),
-        is_error: true,
-    }
 }

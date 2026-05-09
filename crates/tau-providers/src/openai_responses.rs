@@ -1,3 +1,4 @@
+use crate::errors;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use serde::Deserialize;
@@ -16,8 +17,8 @@ pub struct OpenAiResponsesProvider {
 
 impl OpenAiResponsesProvider {
     pub fn from_env(model: Option<String>) -> anyhow::Result<Self> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY is required"))?;
+        let api_key =
+            std::env::var("OPENAI_API_KEY").map_err(|_| errors::missing_env("OPENAI_API_KEY"))?;
         Ok(Self::new(api_key, model))
     }
 
@@ -76,9 +77,7 @@ impl Provider for OpenAiResponsesProvider {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!(
-                "OpenAI Responses request failed: {status} {text}"
-            ));
+            return Err(errors::request_failed("OpenAI Responses", status, text));
         }
         let byte_stream = response.bytes_stream();
         let stream = async_stream::try_stream! {
