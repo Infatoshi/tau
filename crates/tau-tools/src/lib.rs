@@ -1,13 +1,15 @@
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
-use tau_core::{Tool, ToolResult};
-use tau_llm::ToolSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
+use tau_core::{Tool, ToolResult};
+use tau_llm::ToolSchema;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -73,6 +75,151 @@ struct ReadArgs {
     path: String,
     start_line: Option<usize>,
     end_line: Option<usize>,
+}
+
+pub struct WriteTool {
+    cwd: PathBuf,
+}
+
+impl WriteTool {
+    pub fn new(cwd: PathBuf) -> Self {
+        Self { cwd }
+    }
+}
+
+#[async_trait]
+impl Tool for WriteTool {
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: "write".to_string(),
+            description:
+                "Write content to a file atomically, creating parent directories as needed."
+                    .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "content": { "type": "string" }
+                },
+                "required": ["path", "content"]
+            }),
+        }
+    }
+
+    async fn execute(&self, input: Value, _: CancellationToken) -> anyhow::Result<ToolResult> {
+        let args: WriteArgs = serde_json::from_value(input)?;
+        let path = resolve_path(&self.cwd, &args.path);
+        atomic_write(&path, args.content.as_bytes()).await?;
+        Ok(ToolResult {
+            content: format!("wrote {} bytes to {}", args.content.len(), path.display()),
+            is_error: false,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct WriteArgs {
+    path: String,
+    content: String,
+}
+
+pub struct EditTool {
+    cwd: PathBuf,
+}
+
+impl EditTool {
+    pub fn new(cwd: PathBuf) -> Self {
+        Self { cwd }
+    }
+}
+
+#[async_trait]
+impl Tool for EditTool {
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: "edit".to_string(),
+            description: "Edit a UTF-8 file using exact text replacement.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "old_string": { "type": "string" },
+                    "new_string": { "type": "string" },
+                    "replace_all": { "type": "boolean" }
+                },
+                "required": ["path", "old_string", "new_string"]
+            }),
+        }
+    }
+
+    async fn execute(&self, input: Value, _: CancellationToken) -> anyhow::Result<ToolResult> {
+        let args: EditArgs = serde_json::from_value(input)?;
+        let path = resolve_path(&self.cwd, &args.path);
+
+        if args.old_string.is_empty() {
+            return Ok(error_result("old_string must not be empty"));
+        }
+        if symlink_points_outside_cwd(&self.cwd, &path).await? {
+            return Ok(error_result(&format!(
+                "refusing to edit symlink outside cwd: {}",
+                path.display()
+            )));
+        }
+
+        let bytes = fs::read(&path).await?;
+        let (has_bom, content_bytes) = strip_bom(&bytes);
+        let content = String::from_utf8(content_bytes.to_vec())
+            .with_context(|| format!("{} is not valid UTF-8", path.display()))?;
+        let line_ending = detect_line_ending(&content);
+        let normalized_content = normalize_line_endings(&content, line_ending);
+        let old_string = normalize_line_endings(&args.old_string, line_ending);
+        let new_string = normalize_line_endings(&args.new_string, line_ending);
+        let occurrences = normalized_content.matches(&old_string).count();
+
+        if occurrences == 0 {
+            return Ok(error_result(&format!(
+                "old_string not found in {}",
+                path.display()
+            )));
+        }
+        if !args.replace_all.unwrap_or(false) && occurrences > 1 {
+            return Ok(error_result(&format!(
+                "old_string is not unique in {} ({} occurrences). Provide more surrounding context or set replace_all=true.",
+                path.display(),
+                occurrences
+            )));
+        }
+
+        let replaced = if args.replace_all.unwrap_or(false) {
+            normalized_content.replace(&old_string, &new_string)
+        } else {
+            normalized_content.replacen(&old_string, &new_string, 1)
+        };
+        let output = restore_line_endings(&replaced, line_ending);
+        let mut output_bytes = Vec::new();
+        if has_bom {
+            output_bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+        }
+        output_bytes.extend_from_slice(output.as_bytes());
+        atomic_write(&path, &output_bytes).await?;
+
+        Ok(ToolResult {
+            content: format!(
+                "replaced {} occurrence(s) in {}",
+                occurrences,
+                path.display()
+            ),
+            is_error: false,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct EditArgs {
+    path: String,
+    old_string: String,
+    new_string: String,
+    replace_all: Option<bool>,
 }
 
 pub struct BashTool;
@@ -192,6 +339,85 @@ fn resolve_path(cwd: &Path, path: &str) -> PathBuf {
         path.to_path_buf()
     } else {
         cwd.join(path)
+    }
+}
+
+async fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await?;
+        let meta = fs::metadata(parent).await?;
+        if !meta.is_dir() {
+            return Err(anyhow!(
+                "parent path is not a directory: {}",
+                parent.display()
+            ));
+        }
+    }
+    let tmp_path = temp_path(path);
+    fs::write(&tmp_path, bytes).await?;
+    fs::rename(&tmp_path, path).await?;
+    Ok(())
+}
+
+fn temp_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_else(|| OsString::from(".tau-tmp"));
+    name.push(".tau-tmp");
+    path.with_file_name(name)
+}
+
+async fn symlink_points_outside_cwd(cwd: &Path, path: &Path) -> anyhow::Result<bool> {
+    let meta = fs::symlink_metadata(path).await?;
+    if !meta.file_type().is_symlink() {
+        return Ok(false);
+    }
+    let link = fs::read_link(path).await?;
+    let target = if link.is_absolute() {
+        link
+    } else {
+        path.parent().unwrap_or_else(|| Path::new("")).join(link)
+    };
+    let cwd = fs::canonicalize(cwd).await?;
+    let target = fs::canonicalize(target).await?;
+    Ok(!target.starts_with(cwd))
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LineEnding {
+    Lf,
+    Crlf,
+}
+
+fn detect_line_ending(content: &str) -> LineEnding {
+    match content.find('\n') {
+        Some(0) => LineEnding::Lf,
+        Some(idx) if content.as_bytes().get(idx - 1) == Some(&b'\r') => LineEnding::Crlf,
+        Some(_) => LineEnding::Lf,
+        None => LineEnding::Lf,
+    }
+}
+
+fn normalize_line_endings(content: &str, line_ending: LineEnding) -> String {
+    match line_ending {
+        LineEnding::Lf => content.to_string(),
+        LineEnding::Crlf => content.replace("\r\n", "\n"),
+    }
+}
+
+fn restore_line_endings(content: &str, line_ending: LineEnding) -> String {
+    match line_ending {
+        LineEnding::Lf => content.to_string(),
+        LineEnding::Crlf => content.replace('\n', "\r\n"),
+    }
+}
+
+fn strip_bom(bytes: &[u8]) -> (bool, &[u8]) {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        (true, &bytes[3..])
+    } else {
+        (false, bytes)
     }
 }
 

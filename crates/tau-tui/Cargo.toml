@@ -1,0 +1,17 @@
+[package]
+name = "tau-tui"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+tau-core = { path = "../tau-core" }
+tau-llm = { path = "../tau-llm" }
+anyhow.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+unicode-width.workspace = true
+futures.workspace = true
+serde_json.workspace = true

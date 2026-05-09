@@ -1,0 +1,16 @@
+data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}
+
+data: {"type":"response.output_text.delta","delta":"I'll read it."}
+
+data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"read"}}
+
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"path\""}
+
+data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":":\"Cargo.toml\"}"}
+
+data: {"type":"response.function_call_arguments.done","item_id":"fc_1"}
+
+data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"read"}}
+
+data: {"type":"response.completed","response":{"id":"resp_1","status":"completed"}}
+

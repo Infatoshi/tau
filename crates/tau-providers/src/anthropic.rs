@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use futures::TryStreamExt;
-use tau_llm::{
-    ContentBlock, Provider, ProviderRequest, ProviderStream, Role, StreamEvent, ToolCall,
-};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use tau_llm::{
+    ContentBlock, Provider, ProviderRequest, ProviderStream, Role, StreamEvent, ToolCall,
+};
 use tokio_util::sync::CancellationToken;
 
 pub struct AnthropicProvider {

@@ -4,6 +4,7 @@ members = [
     "crates/tau-llm",
     "crates/tau-providers",
     "crates/tau-tools",
+    "crates/tau-tui",
     "crates/tau-cli",
 ]
 resolver = "2"
@@ -31,3 +32,6 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 uuid = { version = "1", features = ["v4", "serde"] }
+ratatui = "0.29"
+crossterm = "0.28"
+unicode-width = "0.2"
