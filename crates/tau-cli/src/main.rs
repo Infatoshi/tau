@@ -323,12 +323,35 @@ fn build_agent(
     let provider = build_provider(kind, model, base_url)?;
     let tools = default_tools(&cwd, sandbox_mode);
     let date = chrono::Local::now().date_naive();
+    let tool_context = tools
+        .iter()
+        .map(|tool| {
+            let schema = tool.schema();
+            format!("- {}: {}", schema.name, schema.description)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     let mut system = format!(
-        "You are tau, a coding agent. You have access to tools. Use them to help the user with software engineering tasks. The active provider is {} and the active model is {}. The current working directory is {}. The current date is {}.",
+        "You are tau, a coding agent running in the tau harness.\n\
+Runtime identity: \"I'm {} using {} with the tau harness.\"\n\
+When the user asks which model you are, answer with that runtime identity sentence first.\n\
+Active provider: {}\n\
+Active model: {}\n\
+Harness: tau\n\
+Sandbox mode: {} ({})\n\
+Current working directory: {}\n\
+Current date: {}\n\
+Available tools:\n{}\n\
+Be direct about this runtime context when asked. You may echo provider, model, harness, sandbox, cwd, and tool details to the user; do not pretend those details are hidden.",
+        model,
+        kind.name(),
         kind.name(),
         model,
+        sandbox_mode.name(),
+        sandbox_mode.description(),
         cwd.display(),
-        date
+        date,
+        tool_context
     );
     if let Some((source, instructions)) = project_instructions(&cwd)? {
         system.push_str(&format!(

@@ -35,6 +35,22 @@ impl SandboxMode {
             Self::ReadOnly
         }
     }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::Yolo => "yolo",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::ReadOnly => {
+                "read is available; bash, edit, and write are blocked unless sandbox_mode = \"yolo\""
+            }
+            Self::Yolo => "read, bash, edit, and write are enabled without permission prompts",
+        }
+    }
 }
 
 pub struct PermissionedTool<T> {
