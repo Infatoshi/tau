@@ -14,6 +14,3 @@ tau-llm = { path = "../tau-llm" }
 serde.workspace = true
 serde_json.workspace = true
 tokio-util.workspace = true
-
-[dev-dependencies]
-tokio.workspace = true

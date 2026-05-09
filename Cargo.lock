@@ -1720,7 +1720,6 @@ dependencies = [
  "dirs",
  "dotenvy",
  "serde",
- "serde_json",
  "serde_yaml",
  "tau-core",
  "tau-llm",
@@ -1729,7 +1728,6 @@ dependencies = [
  "tau-tui",
  "tokio",
  "tokio-util",
- "tracing",
  "tracing-subscriber",
 ]
 
@@ -1777,7 +1775,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tau-llm",
- "tokio",
  "tokio-util",
 ]
 
@@ -1804,7 +1801,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
- "futures",
  "ratatui",
  "serde_json",
  "tau-core",

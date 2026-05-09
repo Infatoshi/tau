@@ -19,7 +19,6 @@ clap.workspace = true
 dirs.workspace = true
 dotenvy.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 serde_yaml.workspace = true
 tau-core = { path = "../tau-core" }
 tau-llm = { path = "../tau-llm" }
@@ -28,5 +27,4 @@ tau-tools = { path = "../tau-tools" }
 tau-tui = { path = "../tau-tui" }
 tokio.workspace = true
 tokio-util.workspace = true
-tracing.workspace = true
 tracing-subscriber.workspace = true
