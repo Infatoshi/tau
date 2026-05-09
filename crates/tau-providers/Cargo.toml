@@ -1,0 +1,20 @@
+[package]
+name = "tau-providers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-stream.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+tau-llm = { path = "../tau-llm" }
+serde.workspace = true
+serde_json.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+

@@ -1,0 +1,20 @@
+[package]
+name = "tau-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+nix.workspace = true
+tau-core = { path = "../tau-core" }
+tau-llm = { path = "../tau-llm" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
