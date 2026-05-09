@@ -8,13 +8,14 @@ Minimal Rust coding-agent harness with JSONL sessions, local tools, multiple pro
 cargo build --release
 mkdir -p ~/.local/bin
 ln -sf "$PWD/target/release/tau" ~/.local/bin/tau
+grep -q 'HOME/.local/bin' ~/.zshrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 ```
 
-Make sure `~/.local/bin` is on `PATH`.
+Open a new shell, then run `tau` from anywhere.
 
 ## Configure
 
-Create `~/.tau/config.toml`:
+Create/edit `~/.tau/config.toml`:
 
 ```toml
 provider = "zai"
@@ -24,29 +25,11 @@ sandbox_mode = "yolo"
 
 Put API keys in your shell environment, a project `.env`, or `~/.tau/.env`.
 
-## Use
-
-```sh
-tau
-tau -p "read Cargo.toml"
-tau --tui
-tau list
-tau resume <hash>
-tau --list-models
-```
-
-Interactive commands:
-
-```text
-/compact
-/help
-```
-
 Project-specific agent instructions go in `AGENTS.md` or `CLAUDE.md`. If both exist, tau reads only `AGENTS.md`.
 
 Developer notes live in `AGENTS.md`.
 
-## Development
+## dev
 
 ```sh
 cargo fmt --check
