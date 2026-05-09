@@ -1,45 +1,12 @@
+use crate::display::AgentDisplay;
 use crate::session::{events_to_messages, SessionEvent, SessionStore};
 use crate::tool::Tool;
 use chrono::Utc;
 use futures::StreamExt;
-use tau_llm::{ContentBlock, Message, Provider, ProviderRequest, Role, StreamEvent, ToolCall};
 use std::collections::HashMap;
-use std::io::Write;
 use std::sync::Arc;
+use tau_llm::{ContentBlock, Message, Provider, ProviderRequest, Role, StreamEvent};
 use tokio_util::sync::CancellationToken;
-
-pub trait AgentDisplay {
-    fn assistant_delta(&mut self, text: &str) -> anyhow::Result<()>;
-    fn tool_call(&mut self, call: &ToolCall) -> anyhow::Result<()>;
-    fn tool_result(&mut self, call: &ToolCall, content: &str, is_error: bool)
-        -> anyhow::Result<()>;
-}
-
-pub struct StdoutDisplay;
-
-impl AgentDisplay for StdoutDisplay {
-    fn assistant_delta(&mut self, text: &str) -> anyhow::Result<()> {
-        print!("{text}");
-        std::io::stdout().flush()?;
-        Ok(())
-    }
-
-    fn tool_call(&mut self, call: &ToolCall) -> anyhow::Result<()> {
-        println!("\n[tool call: {} {}]", call.name, call.input);
-        Ok(())
-    }
-
-    fn tool_result(
-        &mut self,
-        call: &ToolCall,
-        content: &str,
-        is_error: bool,
-    ) -> anyhow::Result<()> {
-        let status = if is_error { "error" } else { "ok" };
-        println!("[tool result: {} {status}]\n{content}", call.name);
-        Ok(())
-    }
-}
 
 pub struct Agent {
     provider: Arc<dyn Provider>,
@@ -84,7 +51,7 @@ impl Agent {
         &mut self,
         user_text: String,
         session: &mut SessionStore,
-        display: &mut dyn AgentDisplay,
+        display: &mut (dyn AgentDisplay + Send),
         cancellation: CancellationToken,
     ) -> anyhow::Result<()> {
         self.messages.push(Message {
@@ -106,7 +73,7 @@ impl Agent {
     pub async fn continue_until_done(
         &mut self,
         session: &mut SessionStore,
-        display: &mut dyn AgentDisplay,
+        display: &mut (dyn AgentDisplay + Send),
         cancellation: CancellationToken,
     ) -> anyhow::Result<()> {
         loop {
@@ -140,14 +107,7 @@ impl Agent {
                             .await?;
                         text.push_str(&delta);
                     }
-                    StreamEvent::ToolCallStart { id, name } => {
-                        let call = ToolCall {
-                            id,
-                            name,
-                            input: serde_json::Value::Null,
-                        };
-                        display.tool_call(&call)?;
-                    }
+                    StreamEvent::ToolCallStart { .. } => {}
                     StreamEvent::ToolCallDelta { .. } => {}
                     StreamEvent::ToolCallDone { call } => {
                         session
@@ -156,6 +116,7 @@ impl Agent {
                                 call: call.clone(),
                             })
                             .await?;
+                        display.tool_call(&call)?;
                         tool_calls.push(call);
                     }
                     StreamEvent::MessageStop {
@@ -188,6 +149,7 @@ impl Agent {
                 .await?;
 
             if tool_calls.is_empty() {
+                display.assistant_done()?;
                 println!();
                 return Ok(());
             }
@@ -227,5 +189,54 @@ impl Agent {
                 content: result_blocks,
             });
         }
+    }
+
+    pub async fn compact_context(
+        &mut self,
+        session: &mut SessionStore,
+        cancellation: CancellationToken,
+    ) -> anyhow::Result<String> {
+        if self.messages.is_empty() {
+            return Ok("No prior conversation to compact.".to_string());
+        }
+        let request = ProviderRequest {
+            model: self.model.clone(),
+            system: "Summarize the conversation for a coding agent that will continue from the compacted context. Preserve user intent, current repo state, decisions made, files changed, commands run, unresolved blockers, and exact next steps. Be concise but complete.".to_string(),
+            messages: self.messages.clone(),
+            tools: Vec::new(),
+            max_tokens: 2048,
+        };
+        let mut stream = self.provider.stream(request, cancellation.clone()).await?;
+        let mut summary = String::new();
+        while let Some(event) = stream.next().await {
+            if cancellation.is_cancelled() {
+                return Err(anyhow::anyhow!("cancelled"));
+            }
+            match event? {
+                StreamEvent::TextDelta { text } => summary.push_str(&text),
+                StreamEvent::Error { message } => return Err(anyhow::anyhow!(message)),
+                _ => {}
+            }
+        }
+        let summary = summary.trim().to_string();
+        if summary.is_empty() {
+            return Err(anyhow::anyhow!(
+                "provider returned an empty compaction summary"
+            ));
+        }
+        session
+            .append(&SessionEvent::Compact {
+                timestamp: Utc::now(),
+                summary: summary.clone(),
+            })
+            .await?;
+        self.messages = vec![Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text {
+                text: format!("Conversation summary so far:\n\n{summary}"),
+            }],
+        }];
+        tracing::info!(session = %session.short_hash(), "compacted session context");
+        Ok(summary)
     }
 }

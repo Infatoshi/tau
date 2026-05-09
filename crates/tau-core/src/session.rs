@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
-use tau_llm::{ContentBlock, Message, Role, ToolCall};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tau_llm::{ContentBlock, Message, Role, ToolCall};
 use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
@@ -39,6 +39,10 @@ pub enum SessionEvent {
         content: String,
         is_error: bool,
     },
+    Compact {
+        timestamp: DateTime<Utc>,
+        summary: String,
+    },
     ModelChange {
         timestamp: DateTime<Utc>,
         model: String,
@@ -56,11 +60,20 @@ impl SessionStore {
     pub async fn create(cwd: &Path, model: &str) -> anyhow::Result<Self> {
         let id = Uuid::new_v4();
         let path = sessions_dir()?.join(format!("{id}.jsonl"));
-        Self::create_at(cwd, model, path).await
+        Self::create_at_with_id(cwd, model, path, id).await
     }
 
     pub async fn create_at(cwd: &Path, model: &str, path: PathBuf) -> anyhow::Result<Self> {
         let id = Uuid::new_v4();
+        Self::create_at_with_id(cwd, model, path, id).await
+    }
+
+    async fn create_at_with_id(
+        cwd: &Path,
+        model: &str,
+        path: PathBuf,
+        id: Uuid,
+    ) -> anyhow::Result<Self> {
         fs::create_dir_all(path.parent().expect("session path has parent")).await?;
         let file = OpenOptions::new()
             .create_new(true)
@@ -154,6 +167,16 @@ pub fn events_to_messages(events: &[SessionEvent]) -> Vec<Message> {
                     is_error: *is_error,
                 });
             }
+            SessionEvent::Compact { summary, .. } => {
+                messages.clear();
+                pending_results.clear();
+                messages.push(Message {
+                    role: Role::User,
+                    content: vec![ContentBlock::Text {
+                        text: format!("Conversation summary so far:\n\n{summary}"),
+                    }],
+                });
+            }
             _ => {}
         }
     }
@@ -199,13 +222,20 @@ pub async fn list_recent(limit: usize) -> anyhow::Result<Vec<(String, DateTime<U
                 _ => None,
             })
             .unwrap_or_default();
-        let hash = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default()
-            .chars()
-            .take(8)
-            .collect();
+        let hash = events
+            .iter()
+            .find_map(|event| match event {
+                SessionEvent::Session { id, .. } => Some(id.to_string()[..8].to_string()),
+                _ => None,
+            })
+            .unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .chars()
+                    .take(8)
+                    .collect()
+            });
         rows.push((hash, DateTime::<Utc>::from(modified), first_user));
     }
     rows.sort_by(|a, b| b.1.cmp(&a.1));
@@ -235,7 +265,7 @@ async fn resolve_hash(hash: &str) -> anyhow::Result<PathBuf> {
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        if stem.starts_with(hash) {
+        if stem.starts_with(hash) || session_header_matches(&path, hash).await {
             matches.push(path);
         }
     }
@@ -244,4 +274,13 @@ async fn resolve_hash(hash: &str) -> anyhow::Result<PathBuf> {
         1 => Ok(matches.remove(0)),
         _ => Err(anyhow::anyhow!("ambiguous session hash {hash}")),
     }
+}
+
+async fn session_header_matches(path: &Path, hash: &str) -> bool {
+    read_events(path).await.is_ok_and(|events| {
+        events.iter().any(|event| match event {
+            SessionEvent::Session { id, .. } => id.to_string().starts_with(hash),
+            _ => false,
+        })
+    })
 }

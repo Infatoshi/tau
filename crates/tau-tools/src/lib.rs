@@ -19,6 +19,56 @@ use tokio_util::sync::CancellationToken;
 const READ_LIMIT: u64 = 10 * 1024 * 1024;
 const OUTPUT_LIMIT: usize = 100 * 1024;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxMode {
+    ReadOnly,
+    Yolo,
+}
+
+impl SandboxMode {
+    pub fn from_config(value: &str) -> Self {
+        if value.eq_ignore_ascii_case("yolo") {
+            Self::Yolo
+        } else {
+            Self::ReadOnly
+        }
+    }
+}
+
+pub struct PermissionedTool<T> {
+    inner: T,
+    mode: SandboxMode,
+}
+
+impl<T> PermissionedTool<T> {
+    pub fn new(inner: T, mode: SandboxMode) -> Self {
+        Self { inner, mode }
+    }
+}
+
+#[async_trait]
+impl<T> Tool for PermissionedTool<T>
+where
+    T: Tool + Send + Sync,
+{
+    fn schema(&self) -> ToolSchema {
+        self.inner.schema()
+    }
+
+    async fn execute(
+        &self,
+        input: Value,
+        cancellation: CancellationToken,
+    ) -> anyhow::Result<ToolResult> {
+        if self.mode != SandboxMode::Yolo {
+            return Ok(error_result(
+                "tool blocked by sandbox_mode; set sandbox_mode = \"yolo\" in ~/.tau/config.toml to allow write/edit/bash",
+            ));
+        }
+        self.inner.execute(input, cancellation).await
+    }
+}
+
 pub struct ReadTool {
     cwd: PathBuf,
 }

@@ -258,7 +258,7 @@ fn done_event(call: PendingCall) -> anyhow::Result<StreamEvent> {
     })
 }
 
-fn messages_to_responses_input(messages: &[tau_llm::Message]) -> Vec<Value> {
+pub fn messages_to_responses_input(messages: &[tau_llm::Message]) -> Vec<Value> {
     messages
         .iter()
         .flat_map(|message| match message.role {

@@ -1,7 +1,7 @@
 use serde_json::json;
 use std::fs as std_fs;
 use tau_core::Tool;
-use tau_tools::{run_bash, BashTool, EditTool, ReadTool, WriteTool};
+use tau_tools::{run_bash, BashTool, EditTool, PermissionedTool, ReadTool, SandboxMode, WriteTool};
 use tempfile::tempdir;
 use tokio::fs;
 use tokio::time::{sleep, Duration};
@@ -27,6 +27,26 @@ async fn read_with_line_range() {
 #[tokio::test]
 async fn bash_output_capture() {
     let result = BashTool
+        .execute(json!({"command": "printf hello"}), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(!result.is_error);
+    assert_eq!(result.content, "hello");
+}
+
+#[tokio::test]
+async fn permissioned_tool_blocks_risky_tools_without_yolo() {
+    let result = PermissionedTool::new(BashTool, SandboxMode::ReadOnly)
+        .execute(json!({"command": "printf hello"}), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(result.is_error);
+    assert!(result.content.contains("sandbox_mode"));
+}
+
+#[tokio::test]
+async fn permissioned_tool_allows_risky_tools_with_yolo() {
+    let result = PermissionedTool::new(BashTool, SandboxMode::Yolo)
         .execute(json!({"command": "printf hello"}), CancellationToken::new())
         .await
         .unwrap();

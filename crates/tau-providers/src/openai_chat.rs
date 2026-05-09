@@ -17,8 +17,12 @@ pub struct OpenAiChatProvider {
 
 impl OpenAiChatProvider {
     pub fn from_env(model: Option<String>, base_url: Option<String>) -> anyhow::Result<Self> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY is required"))?;
+        let api_key = if base_url.as_deref().is_some_and(|url| url.contains("z.ai")) {
+            std::env::var("ZAI_API_KEY").or_else(|_| std::env::var("OPENAI_API_KEY"))
+        } else {
+            std::env::var("OPENAI_API_KEY").or_else(|_| std::env::var("ZAI_API_KEY"))
+        }
+        .map_err(|_| anyhow::anyhow!("OPENAI_API_KEY or ZAI_API_KEY is required"))?;
         Ok(Self::new(api_key, model, base_url))
     }
 
