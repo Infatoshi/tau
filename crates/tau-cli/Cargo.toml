@@ -16,6 +16,7 @@ tau-core = { path = "../tau-core" }
 tau-llm = { path = "../tau-llm" }
 tau-providers = { path = "../tau-providers" }
 tau-tools = { path = "../tau-tools" }
+tau-tui = { path = "../tau-tui" }
 tokio.workspace = true
 tokio-util.workspace = true
 

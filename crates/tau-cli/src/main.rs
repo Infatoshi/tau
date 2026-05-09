@@ -1,25 +1,44 @@
-use clap::{Parser, Subcommand};
-use tau_core::agent::StdoutDisplay;
-use tau_core::session::{list_recent, SessionEvent};
-use tau_core::{Agent, SessionStore, Tool};
-use tau_providers::AnthropicProvider;
-use tau_tools::{BashTool, ReadTool};
+use clap::{Parser, Subcommand, ValueEnum};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tau_core::agent::{AgentDisplay, StdoutDisplay};
+use tau_core::session::{list_recent, SessionEvent};
+use tau_core::{Agent, SessionStore, Tool};
+use tau_llm::{Provider, ToolCall};
+use tau_providers::{AnthropicProvider, OpenAiChatProvider, OpenAiResponsesProvider};
+use tau_tools::{BashTool, EditTool, ReadTool, WriteTool};
+use tau_tui::{AgentEvent, RunOutcome, TuiApp, TuiConfig, UserInput};
 use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-const DEFAULT_MODEL: &str = "claude-sonnet-4-5";
+const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-5";
+const DEFAULT_OPENAI_RESPONSES_MODEL: &str = "gpt-5";
+const DEFAULT_OPENAI_CHAT_MODEL: &str = "gpt-4o";
 
 #[derive(Parser)]
 #[command(name = "tau")]
 struct Cli {
     #[arg(short = 'p', long = "prompt")]
     prompt: Option<String>,
-    #[arg(long, default_value = DEFAULT_MODEL)]
-    model: String,
+    #[arg(long, value_enum, default_value_t = ProviderKind::Anthropic)]
+    provider: ProviderKind,
+    #[arg(long)]
+    model: Option<String>,
+    #[arg(long)]
+    base_url: Option<String>,
+    #[arg(long)]
+    tui: bool,
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
+enum ProviderKind {
+    Anthropic,
+    OpenaiResponses,
+    OpenaiChat,
 }
 
 #[derive(Subcommand)]
@@ -39,14 +58,18 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Command::Resume { hash }) => {
             let (mut session, events) = SessionStore::open_by_hash(&hash).await?;
-            let model = session_model(&events).unwrap_or(cli.model);
-            let mut agent = agent(&model, &events).await?;
-            repl(&mut agent, &mut session).await?;
+            let model = session_model(&events).unwrap_or_else(|| default_model(cli.provider));
+            let mut agent = build_agent(cli.provider, &model, cli.base_url.clone(), &events)?;
+            run_interactive(&mut agent, &mut session, &model, cli.tui).await?;
         }
         None => {
+            let model = cli
+                .model
+                .clone()
+                .unwrap_or_else(|| default_model(cli.provider));
             let cwd = std::env::current_dir()?;
-            let mut session = SessionStore::create(&cwd, &cli.model).await?;
-            let mut agent = agent(&cli.model, &[]).await?;
+            let mut session = SessionStore::create(&cwd, &model).await?;
+            let mut agent = build_agent(cli.provider, &model, cli.base_url.clone(), &[])?;
             if let Some(prompt) = cli.prompt {
                 let cancellation = CancellationToken::new();
                 install_single_cancel(cancellation.clone());
@@ -55,17 +78,47 @@ async fn main() -> anyhow::Result<()> {
                     .run_user_turn(prompt, &mut session, &mut display, cancellation)
                     .await?;
             } else {
-                repl(&mut agent, &mut session).await?;
+                run_interactive(&mut agent, &mut session, &model, cli.tui).await?;
             }
         }
     }
     Ok(())
 }
 
-async fn agent(model: &str, events: &[SessionEvent]) -> anyhow::Result<Agent> {
+fn default_model(kind: ProviderKind) -> String {
+    match kind {
+        ProviderKind::Anthropic => DEFAULT_ANTHROPIC_MODEL.to_string(),
+        ProviderKind::OpenaiResponses => DEFAULT_OPENAI_RESPONSES_MODEL.to_string(),
+        ProviderKind::OpenaiChat => DEFAULT_OPENAI_CHAT_MODEL.to_string(),
+    }
+}
+
+fn build_provider(
+    kind: ProviderKind,
+    model: &str,
+    base_url: Option<String>,
+) -> anyhow::Result<Arc<dyn Provider>> {
+    Ok(match kind {
+        ProviderKind::Anthropic => Arc::new(AnthropicProvider::from_env()?),
+        ProviderKind::OpenaiResponses => {
+            Arc::new(OpenAiResponsesProvider::from_env(Some(model.to_string()))?)
+        }
+        ProviderKind::OpenaiChat => Arc::new(OpenAiChatProvider::from_env(
+            Some(model.to_string()),
+            base_url,
+        )?),
+    })
+}
+
+fn build_agent(
+    kind: ProviderKind,
+    model: &str,
+    base_url: Option<String>,
+    events: &[SessionEvent],
+) -> anyhow::Result<Agent> {
     let cwd = std::env::current_dir()?;
-    let provider = Arc::new(AnthropicProvider::from_env()?);
-    let tools: Vec<Arc<dyn Tool>> = vec![Arc::new(ReadTool::new(cwd.clone())), Arc::new(BashTool)];
+    let provider = build_provider(kind, model, base_url)?;
+    let tools = default_tools(&cwd);
     let date = chrono::Local::now().date_naive();
     let system = format!(
         "You are tau, a coding agent. You have access to tools. Use them to help the user with software engineering tasks. The current working directory is {}. The current date is {}.",
@@ -81,7 +134,29 @@ async fn agent(model: &str, events: &[SessionEvent]) -> anyhow::Result<Agent> {
     ))
 }
 
-async fn repl(agent: &mut Agent, session: &mut SessionStore) -> anyhow::Result<()> {
+fn default_tools(cwd: &Path) -> Vec<Arc<dyn Tool>> {
+    vec![
+        Arc::new(ReadTool::new(cwd.to_path_buf())),
+        Arc::new(BashTool),
+        Arc::new(EditTool::new(cwd.to_path_buf())),
+        Arc::new(WriteTool::new(cwd.to_path_buf())),
+    ]
+}
+
+async fn run_interactive(
+    agent: &mut Agent,
+    session: &mut SessionStore,
+    model: &str,
+    tui: bool,
+) -> anyhow::Result<()> {
+    if tui {
+        run_tui(agent, session, model).await
+    } else {
+        run_repl(agent, session).await
+    }
+}
+
+async fn run_repl(agent: &mut Agent, session: &mut SessionStore) -> anyhow::Result<()> {
     let stdin = BufReader::new(tokio::io::stdin());
     let mut lines = stdin.lines();
     let mut last_ctrl_c: Option<Instant> = None;
@@ -131,6 +206,126 @@ async fn repl(agent: &mut Agent, session: &mut SessionStore) -> anyhow::Result<(
                 }
                 println!("press Ctrl-C again within 1.5 seconds to exit");
             }
+        }
+    }
+}
+
+struct TuiDisplay {
+    tx: mpsc::Sender<AgentEvent>,
+}
+
+impl AgentDisplay for TuiDisplay {
+    fn assistant_delta(&mut self, text: &str) -> anyhow::Result<()> {
+        let _ = self
+            .tx
+            .try_send(AgentEvent::AssistantTextDelta(text.to_string()));
+        Ok(())
+    }
+
+    fn tool_call(&mut self, call: &ToolCall) -> anyhow::Result<()> {
+        let _ = self.tx.try_send(AgentEvent::ToolCallStart {
+            name: call.name.clone(),
+            input: call.input.clone(),
+            id: call.id.clone(),
+        });
+        Ok(())
+    }
+
+    fn tool_result(
+        &mut self,
+        call: &ToolCall,
+        content: &str,
+        is_error: bool,
+    ) -> anyhow::Result<()> {
+        let _ = self.tx.try_send(AgentEvent::ToolCallEnd {
+            id: call.id.clone(),
+            output: content.to_string(),
+            is_error,
+        });
+        Ok(())
+    }
+}
+
+async fn run_tui(
+    agent: &mut Agent,
+    session: &mut SessionStore,
+    model: &str,
+) -> anyhow::Result<()> {
+    let cwd = std::env::current_dir()?;
+    let mut app = TuiApp::new(TuiConfig {
+        model: model.to_string(),
+        cwd,
+        session_hash: session.short_hash().to_string(),
+    });
+
+    let (agent_event_tx, agent_event_rx) = mpsc::channel::<AgentEvent>(128);
+    let (user_input_tx, mut user_input_rx) = mpsc::channel::<UserInput>(32);
+    let cancellation = CancellationToken::new();
+
+    let agent_loop = async {
+        while let Some(input) = user_input_rx.recv().await {
+            let UserInput::Message(text) = input else {
+                continue;
+            };
+
+            let turn_cancel = CancellationToken::new();
+            let mut display = TuiDisplay {
+                tx: agent_event_tx.clone(),
+            };
+            let turn =
+                agent.run_user_turn(text, session, &mut display, turn_cancel.clone());
+            tokio::pin!(turn);
+
+            loop {
+                tokio::select! {
+                    result = &mut turn => {
+                        match result {
+                            Ok(()) => {
+                                let _ = agent_event_tx.send(AgentEvent::TurnComplete).await;
+                            }
+                            Err(err) => {
+                                let _ = agent_event_tx
+                                    .send(AgentEvent::Error(format!("{err:#}")))
+                                    .await;
+                            }
+                        }
+                        break;
+                    }
+                    next = user_input_rx.recv() => {
+                        match next {
+                            Some(UserInput::Cancel) => turn_cancel.cancel(),
+                            Some(UserInput::Message(_)) => {
+                                let _ = agent_event_tx
+                                    .send(AgentEvent::Error(
+                                        "busy running the current turn".to_string(),
+                                    ))
+                                    .await;
+                            }
+                            None => {
+                                turn_cancel.cancel();
+                                let _ = (&mut turn).await;
+                                return anyhow::Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        anyhow::Ok(())
+    };
+
+    let outcome = tokio::select! {
+        ui = app.run(agent_event_rx, user_input_tx, cancellation.clone()) => ui?,
+        agent_result = agent_loop => {
+            agent_result?;
+            RunOutcome::ExitRequested
+        }
+    };
+
+    match outcome {
+        RunOutcome::ExitRequested => {
+            print_exit(session);
+            Ok(())
         }
     }
 }
