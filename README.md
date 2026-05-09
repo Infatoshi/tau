@@ -10,8 +10,6 @@ minimal rust coding-agent harness
 cargo run --bin tau-install
 ```
 
-![tau demo](assets/demo.gif)
-
 1. the first `tau` run creates `~/.tau/config.yaml`
 
 2. api keys go in a project `.env`, or `~/.tau/.env`.
@@ -19,3 +17,5 @@ cargo run --bin tau-install
 3. harness reads `AGENTS.md`
 
 4. dev/testing workflow is `cargo fmt --check && cargo test && cargo clippy --all-targets --all-features -- -D warnings`
+
+![tau demo](assets/demo.gif)
