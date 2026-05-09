@@ -45,3 +45,12 @@ Interactive commands:
 Project-specific agent instructions go in `AGENTS.md` or `CLAUDE.md`. If both exist, tau reads only `AGENTS.md`.
 
 Developer notes live in `AGENTS.md`.
+
+## Development
+
+```sh
+cargo fmt --check
+cargo test
+cargo clippy --all-targets --all-features -- -D warnings
+cargo build --release
+```
