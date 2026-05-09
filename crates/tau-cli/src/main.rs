@@ -75,6 +75,7 @@ enum Command {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_logging()?;
+    load_env_files();
     let cli = Cli::parse();
     let config = TauConfig::load().await?;
     if cli.list_models {
@@ -129,6 +130,13 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn load_env_files() {
+    let _ = dotenvy::dotenv();
+    if let Some(home) = dirs::home_dir() {
+        let _ = dotenvy::from_path(home.join(".tau").join(".env"));
+    }
 }
 
 #[derive(Default, Deserialize)]
