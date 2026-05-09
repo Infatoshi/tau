@@ -302,11 +302,17 @@ fn build_agent(
     let provider = build_provider(kind, model, base_url)?;
     let tools = default_tools(&cwd, sandbox_mode);
     let date = chrono::Local::now().date_naive();
-    let system = format!(
+    let mut system = format!(
         "You are tau, a coding agent. You have access to tools. Use them to help the user with software engineering tasks. The current working directory is {}. The current date is {}.",
         cwd.display(),
         date
     );
+    if let Some((source, instructions)) = project_instructions(&cwd)? {
+        system.push_str(&format!(
+            "\n\nProject instructions from {}:\n\n{}",
+            source, instructions
+        ));
+    }
     Ok(Agent::from_events(
         provider,
         tools,
@@ -314,6 +320,21 @@ fn build_agent(
         system,
         events,
     ))
+}
+
+fn project_instructions(cwd: &Path) -> anyhow::Result<Option<(String, String)>> {
+    for file_name in ["AGENTS.md", "CLAUDE.md"] {
+        let path = cwd.join(file_name);
+        if path.is_file() {
+            let content = std::fs::read_to_string(&path)?;
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some((file_name.to_string(), trimmed.to_string())));
+        }
+    }
+    Ok(None)
 }
 
 fn default_tools(cwd: &Path, sandbox_mode: SandboxMode) -> Vec<Arc<dyn Tool>> {

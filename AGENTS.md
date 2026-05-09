@@ -28,6 +28,12 @@ Run those before declaring non-trivial changes complete.
 
 Sessions are append-only JSONL files under `~/.tau/sessions/`. `tau resume <hash>` should resolve a single session and hydrate only that session's messages. The terminal resume preview should stay short; the provider still receives the full hydrated context.
 
+Project-specific harness instructions are read from the current working directory:
+
+- `AGENTS.md` is preferred.
+- `CLAUDE.md` is used only when `AGENTS.md` is absent.
+- If both exist, only `AGENTS.md` is injected into the tau system prompt.
+
 `~/.tau/config.toml` may set:
 
 ```toml
@@ -38,11 +44,30 @@ sandbox_mode = "yolo"
 
 CLI flags override config values. `sandbox_mode = "yolo"` allows `bash`, `edit`, and `write`; other values keep those risky tools blocked. `read` remains available.
 
+API keys are read from exported shell environment variables, a project `.env`, or `~/.tau/.env`.
+
 ## Provider Notes
 
 Named provider modes currently include `anthropic`, `openai-responses`, `openai-chat`, `zai`, `kimi`, `minimax`, `deepseek`, `openrouter`, `groq`, `cerebras`, `xai`, and `gemini`.
 
 Most named non-Anthropic providers are OpenAI Chat Completions-compatible wrappers with provider-specific base URLs and API-key environment variables. Keep provider-specific quirks isolated in `tau-providers` or in the provider selection table in `tau-cli`.
+
+Provider env vars:
+
+```text
+anthropic         ANTHROPIC_API_KEY
+openai-responses  OPENAI_API_KEY
+openai-chat       OPENAI_API_KEY or ZAI_API_KEY for z.ai URLs
+zai               ZAI_API_KEY
+kimi              MOONSHOT_API_KEY or KIMI_API_KEY
+minimax           MINIMAX_API_KEY
+deepseek          DEEPSEEK_API_KEY
+openrouter        OPENROUTER_API_KEY
+groq              GROQ_API_KEY
+cerebras          CEREBRAS_API_KEY
+xai               XAI_API_KEY
+gemini            GEMINI_API_KEY or GOOGLE_API_KEY
+```
 
 OpenAI Responses has both an item `id` and a `call_id`; `tau` maps the canonical tool id to the Responses `call_id` so tool results can be piped back as `function_call_output.call_id`.
 
