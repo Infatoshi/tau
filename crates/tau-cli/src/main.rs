@@ -66,6 +66,25 @@ enum ProviderKind {
     Gemini,
 }
 
+impl ProviderKind {
+    fn name(self) -> &'static str {
+        match self {
+            ProviderKind::Anthropic => "anthropic",
+            ProviderKind::OpenaiResponses => "openai-responses",
+            ProviderKind::OpenaiChat => "openai-chat",
+            ProviderKind::Zai => "zai",
+            ProviderKind::Kimi => "kimi",
+            ProviderKind::Minimax => "minimax",
+            ProviderKind::Deepseek => "deepseek",
+            ProviderKind::Openrouter => "openrouter",
+            ProviderKind::Groq => "groq",
+            ProviderKind::Cerebras => "cerebras",
+            ProviderKind::Xai => "xai",
+            ProviderKind::Gemini => "gemini",
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     Resume { hash: String },
@@ -303,7 +322,9 @@ fn build_agent(
     let tools = default_tools(&cwd, sandbox_mode);
     let date = chrono::Local::now().date_naive();
     let mut system = format!(
-        "You are tau, a coding agent. You have access to tools. Use them to help the user with software engineering tasks. The current working directory is {}. The current date is {}.",
+        "You are tau, a coding agent. You have access to tools. Use them to help the user with software engineering tasks. The active provider is {} and the active model is {}. The current working directory is {}. The current date is {}.",
+        kind.name(),
+        model,
         cwd.display(),
         date
     );

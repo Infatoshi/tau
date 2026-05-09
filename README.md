@@ -1,6 +1,6 @@
 # tau
 
-![tau thumbnail](assets/thumbnail.gif)
+![tau thumbnail](assets/thumbnail.png)
 
 Minimal Rust coding-agent harness with JSONL sessions, local tools, multiple providers, and an optional TUI.
 
@@ -30,6 +30,13 @@ Put API keys in your shell environment, a project `.env`, or `~/.tau/.env`.
 Project-specific agent instructions go in `AGENTS.md` or `CLAUDE.md`. If both exist, tau reads only `AGENTS.md`.
 
 Developer notes live in `AGENTS.md`.
+
+## demo
+
+```sh
+tau -p "Which provider and model are active? Read README.md and summarize this repo in one sentence."
+tau
+```
 
 ## dev
 
