@@ -458,7 +458,7 @@ impl ComputerUseArgs {
             .as_ref()
             .map(|app| app.trim())
             .filter(|app| !app.is_empty())
-            .map(ToOwned::to_owned)
+            .map(normalize_app_ref)
     }
 
     fn normalize_provider_arg_tags(&mut self) {
@@ -831,6 +831,13 @@ fn tagged_args(raw: &str) -> Vec<(String, String)> {
         args.push((key, value));
     }
     args
+}
+
+fn normalize_app_ref(app: &str) -> String {
+    match app.trim().to_ascii_lowercase().as_str() {
+        "chrome" => "Google Chrome".to_string(),
+        _ => app.trim().to_string(),
+    }
 }
 
 fn point_from_tool_result(result: ToolResult) -> Result<overlay::OverlayPoint, ToolResult> {
@@ -1746,5 +1753,33 @@ mod tests {
 
         assert_eq!(args.action, "focus_app");
         assert_eq!(args.app.as_deref(), Some("Google Chrome"));
+    }
+
+    #[test]
+    fn normalizes_common_chrome_app_alias() {
+        let args = ComputerUseArgs {
+            action: "focus_app".to_string(),
+            app: Some("Chrome".to_string()),
+            element_index: None,
+            x: None,
+            y: None,
+            coordinate_space: None,
+            from_x: None,
+            from_y: None,
+            to_x: None,
+            to_y: None,
+            duration_ms: None,
+            click_count: None,
+            button: None,
+            physical_input: false,
+            direction: None,
+            pages: None,
+            text: None,
+            key: None,
+            value: None,
+            max_depth: None,
+        };
+
+        assert_eq!(args.optional_app().as_deref(), Some("Google Chrome"));
     }
 }
