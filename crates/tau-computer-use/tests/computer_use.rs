@@ -37,6 +37,7 @@ fn schema_exposes_core_actions() {
     assert!(schema.description.contains("paste_text"));
     assert!(schema.description.contains("locked window"));
     assert!(schema.description.contains("frontmost"));
+    assert!(schema.description.contains("revoked"));
     assert!(schema.description.contains("turn ends"));
 }
 
@@ -72,6 +73,20 @@ async fn missing_action_returns_tool_error_instead_of_deserialize_error() {
         .unwrap();
     assert!(result.is_error);
     assert!(result.content.contains("action required"));
+}
+
+#[tokio::test]
+async fn recovers_provider_arg_tag_embedded_in_object_key() {
+    let result = ComputerUseTool::default()
+        .execute(
+            json!({"press_key\n<arg_key>key": "Escape"}),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(result.is_error);
+    assert!(!result.content.contains("action required"));
+    assert!(result.content.contains("active focus_app window lock"));
 }
 
 #[tokio::test]

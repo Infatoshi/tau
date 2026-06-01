@@ -24,6 +24,7 @@ const OUTPUT_LIMIT: usize = 100 * 1024;
 pub struct ComputerUseTool {
     overlay_session: Arc<Mutex<overlay::OverlaySession>>,
     window_lock: Arc<Mutex<Option<WindowLock>>>,
+    focus_revoked: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +38,7 @@ impl Default for ComputerUseTool {
         Self {
             overlay_session: Arc::new(Mutex::new(overlay::OverlaySession::new())),
             window_lock: Arc::new(Mutex::new(None)),
+            focus_revoked: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -46,7 +48,7 @@ impl Tool for ComputerUseTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "computer_use".to_string(),
-            description: "Inspect and control visible macOS apps through accessibility: list_apps, focus_app, get_app_state, click, scroll, drag, move_tau, type_text, paste_text, press_key, set_value, mark_app, and show_tau. focus_app shows the tau marker, binds computer_use to that focused app window, and keeps the marker visible until the computer-use turn ends. Input actions require that locked window to remain frontmost; if the user changes focus, input is blocked instead of re-focusing. paste_text uses the clipboard with best-effort restore. Tau marker movement is a visual overlay only. Raw coordinate click/scroll requires physical_input=true. When app is supplied, x/y are app-window coordinates unless coordinate_space=screen. This exposes UI structure and explicit input events, not private app APIs or image understanding.".to_string(),
+            description: "Inspect and control visible macOS apps through accessibility: list_apps, focus_app, get_app_state, click, scroll, drag, move_tau, type_text, paste_text, press_key, set_value, mark_app, and show_tau. focus_app shows the tau marker, binds computer_use to that focused app window, and keeps the marker visible until the computer-use turn ends. Input and get_app_state actions default to the locked focus_app window when app is omitted, and input requires that locked window to remain frontmost. If the user changes focus, input is blocked and the focus lock is revoked for the rest of the turn instead of re-focusing. paste_text uses the clipboard with best-effort restore. Tau marker movement is a visual overlay only. Raw coordinate click/scroll requires physical_input=true. When app is supplied, x/y are app-window coordinates unless coordinate_space=screen. This exposes UI structure and explicit input events, not private app APIs or image understanding.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -56,7 +58,7 @@ impl Tool for ComputerUseTool {
                     },
                     "app": {
                         "type": "string",
-                        "description": "App process name or bundle identifier, for example Discord or com.hnc.Discord. Required for app inspection, app-relative targets, element_index actions, and all input actions."
+                        "description": "App process name or bundle identifier, for example Discord or com.hnc.Discord. Required for focus_app. For get_app_state and input actions, app defaults to the locked focus_app window when omitted."
                     },
                     "element_index": {
                         "type": "integer",
@@ -148,8 +150,9 @@ impl Tool for ComputerUseTool {
     }
 
     async fn execute(&self, input: Value, _: CancellationToken) -> anyhow::Result<ToolResult> {
-        let mut args: ComputerUseArgs = serde_json::from_value(input)?;
+        let mut args: ComputerUseArgs = serde_json::from_value(input.clone())?;
         args.normalize_provider_arg_tags();
+        args.recover_provider_key_tags(&input);
         if args.action.is_empty() {
             return Ok(tool_error("computer_use action required"));
         }
@@ -163,7 +166,7 @@ impl Tool for ComputerUseTool {
                 self.run_marked_focus_app(app).await
             }
             "get_app_state" => {
-                let app = match args.require_app() {
+                let app = match self.app_or_lock(args.optional_app(), "get_app_state").await {
                     Ok(app) => app,
                     Err(result) => return Ok(result),
                 };
@@ -179,15 +182,19 @@ impl Tool for ComputerUseTool {
                 .await
             }
             "click" => {
-                let app = args.optional_app();
+                let requested_app = args.optional_app();
                 let click_count = args.click_count.unwrap_or(1).clamp(1, 10);
                 let button = match args.pointer_button() {
                     Ok(button) => button,
                     Err(result) => return Ok(result),
                 };
                 if let Some(element_index) = args.element_index {
-                    let Some(app) = app else {
-                        return Ok(tool_error("click with element_index requires app"));
+                    let app = match self
+                        .input_app(requested_app, "click with element_index")
+                        .await
+                    {
+                        Ok(app) => app,
+                        Err(result) => return Ok(result),
                     };
                     let expected_identity = match self.require_input_lock(&app).await? {
                         Ok(identity) => identity,
@@ -220,13 +227,12 @@ impl Tool for ComputerUseTool {
                         "coordinate click sends real mouse events; set physical_input=true, or prefer element_index or focus_app",
                     ));
                 }
-                if let Err(result) = args.coordinate_space(app.is_some()) {
+                if let Err(result) = args.coordinate_space(true) {
                     return Ok(result);
                 }
-                let Some(app) = app else {
-                    return Ok(tool_error(
-                        "coordinate click requires app and an active focus_app window lock",
-                    ));
+                let app = match self.input_app(requested_app, "coordinate click").await {
+                    Ok(app) => app,
+                    Err(result) => return Ok(result),
                 };
                 let _expected_identity = match self.require_input_lock(&app).await? {
                     Ok(identity) => identity,
@@ -249,7 +255,7 @@ impl Tool for ComputerUseTool {
                 .await
             }
             "scroll" => {
-                let app = args.optional_app();
+                let requested_app = args.optional_app();
                 let direction = match args.scroll_direction() {
                     Ok(direction) => direction,
                     Err(result) => return Ok(result),
@@ -259,10 +265,9 @@ impl Tool for ComputerUseTool {
                         "scroll sends real scroll events; set physical_input=true after choosing a safe target",
                     ));
                 }
-                let Some(app) = app else {
-                    return Ok(tool_error(
-                        "scroll requires app and an active focus_app window lock",
-                    ));
+                let app = match self.input_app(requested_app, "scroll").await {
+                    Ok(app) => app,
+                    Err(result) => return Ok(result),
                 };
                 let _expected_identity = match self.require_input_lock(&app).await? {
                     Ok(identity) => identity,
@@ -309,7 +314,7 @@ impl Tool for ComputerUseTool {
                 }
             }
             "type_text" => {
-                let app = match args.require_app() {
+                let app = match self.input_app(args.optional_app(), "type_text").await {
                     Ok(app) => app,
                     Err(result) => return Ok(result),
                 };
@@ -323,7 +328,7 @@ impl Tool for ComputerUseTool {
                 run_action(vec!["type_text".to_string(), app, text, expected_identity]).await
             }
             "paste_text" => {
-                let app = match args.require_app() {
+                let app = match self.input_app(args.optional_app(), "paste_text").await {
                     Ok(app) => app,
                     Err(result) => return Ok(result),
                 };
@@ -337,7 +342,7 @@ impl Tool for ComputerUseTool {
                 run_action(vec!["paste_text".to_string(), app, text, expected_identity]).await
             }
             "press_key" => {
-                let app = match args.require_app() {
+                let app = match self.input_app(args.optional_app(), "press_key").await {
                     Ok(app) => app,
                     Err(result) => return Ok(result),
                 };
@@ -369,7 +374,7 @@ impl Tool for ComputerUseTool {
                 .await
             }
             "set_value" => {
-                let app = match args.require_app() {
+                let app = match self.input_app(args.optional_app(), "set_value").await {
                     Ok(app) => app,
                     Err(result) => return Ok(result),
                 };
@@ -393,7 +398,7 @@ impl Tool for ComputerUseTool {
                 .await
             }
             "mark_app" => {
-                let app = match args.require_app() {
+                let app = match self.app_or_lock(args.optional_app(), "mark_app").await {
                     Ok(app) => app,
                     Err(result) => return Ok(result),
                 };
@@ -422,6 +427,7 @@ impl Tool for ComputerUseTool {
 
     async fn cleanup(&self) -> anyhow::Result<()> {
         *self.window_lock.lock().await = None;
+        *self.focus_revoked.lock().await = None;
         self.overlay_session.lock().await.stop().await
     }
 }
@@ -471,38 +477,65 @@ impl ComputerUseArgs {
             self.action = action.trim().to_string();
         }
         for (key, value) in tagged_args(&raw) {
-            match key.as_str() {
-                "app" if self.app.is_none() => self.app = Some(value),
-                "key" if self.key.is_none() => self.key = Some(value),
-                "text" if self.text.is_none() => self.text = Some(value),
-                "value" if self.value.is_none() => self.value = Some(value),
-                "coordinate_space" if self.coordinate_space.is_none() => {
-                    self.coordinate_space = Some(value)
-                }
-                "direction" if self.direction.is_none() => self.direction = Some(value),
-                "element_index" if self.element_index.is_none() => {
-                    self.element_index = value.parse().ok()
-                }
-                "x" if self.x.is_none() => self.x = value.parse().ok(),
-                "y" if self.y.is_none() => self.y = value.parse().ok(),
-                "from_x" if self.from_x.is_none() => self.from_x = value.parse().ok(),
-                "from_y" if self.from_y.is_none() => self.from_y = value.parse().ok(),
-                "to_x" if self.to_x.is_none() => self.to_x = value.parse().ok(),
-                "to_y" if self.to_y.is_none() => self.to_y = value.parse().ok(),
-                "duration_ms" if self.duration_ms.is_none() => {
-                    self.duration_ms = value.parse().ok()
-                }
-                "click_count" if self.click_count.is_none() => {
-                    self.click_count = value.parse().ok()
-                }
-                "button" if self.button.is_none() => self.button = Some(value),
-                "physical_input" if !self.physical_input => {
-                    self.physical_input = matches!(value.as_str(), "true" | "1")
-                }
-                "pages" if self.pages.is_none() => self.pages = value.parse().ok(),
-                "max_depth" if self.max_depth.is_none() => self.max_depth = value.parse().ok(),
-                _ => {}
+            self.apply_provider_arg(&key, value);
+        }
+    }
+
+    fn recover_provider_key_tags(&mut self, input: &Value) {
+        let Some(object) = input.as_object() else {
+            return;
+        };
+        for (raw_key, value) in object {
+            let Some(tag_start) = raw_key.find("<arg_key>") else {
+                continue;
+            };
+            if self.action.is_empty() {
+                self.action = raw_key[..tag_start].trim().to_string();
             }
+            let key_part = &raw_key[(tag_start + "<arg_key>".len())..];
+            let key = key_part
+                .split("</arg_key>")
+                .next()
+                .unwrap_or(key_part)
+                .trim();
+            if key.is_empty() {
+                continue;
+            }
+            let Some(value) = provider_value_to_string(value) else {
+                continue;
+            };
+            self.apply_provider_arg(key, value);
+        }
+    }
+
+    fn apply_provider_arg(&mut self, key: &str, value: String) {
+        match key {
+            "app" if self.app.is_none() => self.app = Some(value),
+            "key" if self.key.is_none() => self.key = Some(value),
+            "text" if self.text.is_none() => self.text = Some(value),
+            "value" if self.value.is_none() => self.value = Some(value),
+            "coordinate_space" if self.coordinate_space.is_none() => {
+                self.coordinate_space = Some(value)
+            }
+            "direction" if self.direction.is_none() => self.direction = Some(value),
+            "element_index" if self.element_index.is_none() => {
+                self.element_index = value.parse().ok()
+            }
+            "x" if self.x.is_none() => self.x = value.parse().ok(),
+            "y" if self.y.is_none() => self.y = value.parse().ok(),
+            "from_x" if self.from_x.is_none() => self.from_x = value.parse().ok(),
+            "from_y" if self.from_y.is_none() => self.from_y = value.parse().ok(),
+            "to_x" if self.to_x.is_none() => self.to_x = value.parse().ok(),
+            "to_y" if self.to_y.is_none() => self.to_y = value.parse().ok(),
+            "duration_ms" if self.duration_ms.is_none() => self.duration_ms = value.parse().ok(),
+            "click_count" if self.click_count.is_none() => self.click_count = value.parse().ok(),
+            "button" if self.button.is_none() => self.button = Some(value),
+            "physical_input" if !self.physical_input => {
+                self.physical_input = matches!(value.as_str(), "true" | "1")
+            }
+            "pages" if self.pages.is_none() => self.pages = value.parse().ok(),
+            "max_depth" if self.max_depth.is_none() => self.max_depth = value.parse().ok(),
+            _ => {}
         }
     }
 
@@ -803,6 +836,15 @@ fn bool_flag(value: bool) -> String {
     if value { "1" } else { "0" }.to_string()
 }
 
+fn provider_value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.trim().to_string()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        _ => None,
+    }
+}
+
 fn tagged_args(raw: &str) -> Vec<(String, String)> {
     let mut args = Vec::new();
     let mut rest = raw;
@@ -855,7 +897,59 @@ fn window_center_from_tool_result(result: ToolResult) -> Result<overlay::Overlay
 }
 
 impl ComputerUseTool {
+    async fn app_or_lock(
+        &self,
+        requested_app: Option<String>,
+        action: &str,
+    ) -> Result<String, ToolResult> {
+        if let Some(app) = requested_app {
+            return Ok(app);
+        }
+        if let Some(reason) = self.focus_revoked.lock().await.clone() {
+            return Err(tool_error(&format!(
+                "{action} blocked: computer_use focus lock was revoked for this turn after {reason}; stop and report this blocker"
+            )));
+        }
+        let Some(lock) = self.window_lock.lock().await.clone() else {
+            return Err(tool_error(&format!(
+                "{action} requires app or an active focus_app window lock"
+            )));
+        };
+        Ok(lock.app)
+    }
+
+    async fn input_app(
+        &self,
+        requested_app: Option<String>,
+        action: &str,
+    ) -> Result<String, ToolResult> {
+        self.app_or_lock(requested_app, action).await
+    }
+
+    async fn revoked_focus_error(&self, action: &str) -> Option<ToolResult> {
+        self.focus_revoked
+            .lock()
+            .await
+            .clone()
+            .map(|reason| {
+                tool_error(&format!(
+                    "{action} blocked: computer_use focus lock was revoked for this turn after {reason}; stop and report this blocker"
+                ))
+            })
+    }
+
+    async fn revoke_focus(&self, reason: String) -> ToolResult {
+        *self.window_lock.lock().await = None;
+        *self.focus_revoked.lock().await = Some(reason.clone());
+        tool_error(&format!(
+            "computer_use input blocked: {reason}; focus lock revoked for this turn, stop and report this blocker instead of retrying or re-focusing"
+        ))
+    }
+
     async fn run_marked_focus_app(&self, app: String) -> anyhow::Result<ToolResult> {
+        if let Some(result) = self.revoked_focus_error("focus_app").await {
+            return Ok(result);
+        }
         let focus_result = run_action(vec!["focus_app".to_string(), app.clone()]).await?;
         if focus_result.is_error {
             return Ok(focus_result);
@@ -902,6 +996,9 @@ impl ComputerUseTool {
     }
 
     async fn require_input_lock(&self, app: &str) -> anyhow::Result<Result<String, ToolResult>> {
+        if let Some(result) = self.revoked_focus_error("input action").await {
+            return Ok(Err(result));
+        }
         let Some(lock) = self.window_lock.lock().await.clone() else {
             return Ok(Err(tool_error(
                 "computer_use input blocked: call focus_app first to lock a target window",
@@ -914,10 +1011,12 @@ impl ComputerUseTool {
         }
         let target_identity = target.content.trim();
         if target_identity != lock.identity {
-            return Ok(Err(tool_error(&format!(
-                "computer_use input blocked: app/window changed from locked target {} ({}) to {} ({})",
-                lock.app, lock.identity, app, target_identity
-            ))));
+            return Ok(Err(self
+                .revoke_focus(format!(
+                    "app/window changed from locked target {} ({}) to {} ({})",
+                    lock.app, lock.identity, app, target_identity
+                ))
+                .await));
         }
 
         let frontmost = run_action(vec!["frontmost_window_identity".to_string()]).await?;
@@ -926,10 +1025,12 @@ impl ComputerUseTool {
         }
         let frontmost_identity = frontmost.content.trim();
         if frontmost_identity != lock.identity {
-            return Ok(Err(tool_error(&format!(
-                "computer_use input blocked: frontmost window changed; locked target is {} ({}) but frontmost is {}",
-                lock.app, lock.identity, frontmost_identity
-            ))));
+            return Ok(Err(self
+                .revoke_focus(format!(
+                    "frontmost window changed; locked target is {} ({}) but frontmost is {}",
+                    lock.app, lock.identity, frontmost_identity
+                ))
+                .await));
         }
 
         Ok(Ok(lock.identity))
@@ -1781,5 +1882,61 @@ mod tests {
         };
 
         assert_eq!(args.optional_app().as_deref(), Some("Google Chrome"));
+    }
+
+    #[tokio::test]
+    async fn input_app_defaults_to_locked_focus_app() {
+        let tool = ComputerUseTool::default();
+        *tool.window_lock.lock().await = Some(WindowLock {
+            app: "Google Chrome".to_string(),
+            identity: "com.google.Chrome|909|864,33,864,1084".to_string(),
+        });
+
+        assert_eq!(
+            tool.input_app(None, "press_key").await.unwrap(),
+            "Google Chrome"
+        );
+        assert_eq!(
+            tool.input_app(Some("Discord".to_string()), "press_key")
+                .await
+                .unwrap(),
+            "Discord"
+        );
+    }
+
+    #[tokio::test]
+    async fn input_app_requires_app_or_lock() {
+        let result = ComputerUseTool::default()
+            .input_app(None, "press_key")
+            .await
+            .unwrap_err();
+
+        assert!(result.is_error);
+        assert!(result.content.contains("active focus_app window lock"));
+    }
+
+    #[tokio::test]
+    async fn focus_revocation_blocks_refocus_and_input() {
+        let tool = ComputerUseTool::default();
+        *tool.focus_revoked.lock().await = Some("frontmost window changed".to_string());
+
+        let result = tool
+            .run_marked_focus_app("Google Chrome".to_string())
+            .await
+            .unwrap();
+        assert!(result.is_error);
+        assert!(result.content.contains("revoked"));
+
+        let result = tool.input_app(None, "press_key").await.unwrap_err();
+        assert!(result.is_error);
+        assert!(result.content.contains("revoked"));
+
+        let result = tool
+            .require_input_lock("Google Chrome")
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(result.is_error);
+        assert!(result.content.contains("revoked"));
     }
 }
