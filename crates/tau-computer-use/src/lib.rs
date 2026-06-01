@@ -150,6 +150,9 @@ impl Tool for ComputerUseTool {
     async fn execute(&self, input: Value, _: CancellationToken) -> anyhow::Result<ToolResult> {
         let mut args: ComputerUseArgs = serde_json::from_value(input)?;
         args.normalize_provider_arg_tags();
+        if args.action.is_empty() {
+            return Ok(tool_error("computer_use action required"));
+        }
         match args.action.as_str() {
             "list_apps" => run_action(vec!["list_apps".to_string()]).await,
             "focus_app" => {
@@ -425,6 +428,7 @@ impl Tool for ComputerUseTool {
 
 #[derive(Deserialize)]
 struct ComputerUseArgs {
+    #[serde(default)]
     action: String,
     app: Option<String>,
     element_index: Option<u32>,
@@ -459,6 +463,7 @@ impl ComputerUseArgs {
 
     fn normalize_provider_arg_tags(&mut self) {
         if !self.action.contains("<arg_key>") {
+            self.action = self.action.trim().to_string();
             return;
         }
         let raw = self.action.clone();
@@ -812,11 +817,17 @@ fn tagged_args(raw: &str) -> Vec<(String, String)> {
             continue;
         };
         rest = &rest[(value_start + "<arg_value>".len())..];
-        let Some(value_end) = rest.find("</arg_value>") else {
-            break;
+        let (value, next_rest) = if let Some(value_end) = rest.find("</arg_value>") {
+            (
+                rest[..value_end].trim().to_string(),
+                &rest[(value_end + "</arg_value>".len())..],
+            )
+        } else if let Some(next_key) = rest.find("<arg_key>") {
+            (rest[..next_key].trim().to_string(), &rest[next_key..])
+        } else {
+            (rest.trim().to_string(), "")
         };
-        let value = rest[..value_end].trim().to_string();
-        rest = &rest[(value_end + "</arg_value>".len())..];
+        rest = next_rest;
         args.push((key, value));
     }
     args
@@ -1679,6 +1690,37 @@ mod tests {
         let mut args = ComputerUseArgs {
             action: "focus_app\n<arg_key>app</arg_key>\n<arg_value>Google Chrome</arg_value>"
                 .to_string(),
+            app: None,
+            element_index: None,
+            x: None,
+            y: None,
+            coordinate_space: None,
+            from_x: None,
+            from_y: None,
+            to_x: None,
+            to_y: None,
+            duration_ms: None,
+            click_count: None,
+            button: None,
+            physical_input: false,
+            direction: None,
+            pages: None,
+            text: None,
+            key: None,
+            value: None,
+            max_depth: None,
+        };
+
+        args.normalize_provider_arg_tags();
+
+        assert_eq!(args.action, "focus_app");
+        assert_eq!(args.app.as_deref(), Some("Google Chrome"));
+    }
+
+    #[test]
+    fn normalizes_unclosed_provider_arg_value_tag() {
+        let mut args = ComputerUseArgs {
+            action: "focus_app\n<arg_key>app</arg_key>\n<arg_value>Google Chrome".to_string(),
             app: None,
             element_index: None,
             x: None,

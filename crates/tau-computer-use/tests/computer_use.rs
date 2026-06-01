@@ -65,6 +65,16 @@ async fn rejects_unknown_action_before_touching_os() {
 }
 
 #[tokio::test]
+async fn missing_action_returns_tool_error_instead_of_deserialize_error() {
+    let result = ComputerUseTool::default()
+        .execute(json!({}), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(result.is_error);
+    assert!(result.content.contains("action required"));
+}
+
+#[tokio::test]
 async fn show_tau_requires_point_before_touching_os() {
     let result = ComputerUseTool::default()
         .execute(json!({"action": "show_tau"}), CancellationToken::new())
