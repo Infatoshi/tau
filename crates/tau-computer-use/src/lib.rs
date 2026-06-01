@@ -15,7 +15,6 @@ const DEFAULT_TREE_DEPTH: u8 = 6;
 const MAX_TREE_DEPTH: u8 = 10;
 const MAX_MARK_DURATION_MS: u64 = 30_000;
 const DEFAULT_DRAG_DURATION_MS: u64 = 700;
-const MAX_SCROLL_PAGES: f64 = 10.0;
 
 #[cfg(target_os = "macos")]
 const OUTPUT_LIMIT: usize = 100 * 1024;
@@ -48,7 +47,7 @@ impl Tool for ComputerUseTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: "computer_use".to_string(),
-            description: "Inspect and control visible macOS apps through accessibility: list_apps, focus_app, get_app_state, click, scroll, drag, move_tau, type_text, paste_text, press_key, set_value, mark_app, and show_tau. focus_app shows the tau marker, binds computer_use to that focused app window, and keeps the marker visible until the computer-use turn ends. Input and get_app_state actions default to the locked focus_app window when app is omitted, and input requires that locked window to remain frontmost. If the user changes focus, input is blocked and the focus lock is revoked for the rest of the turn instead of re-focusing. paste_text uses the clipboard with best-effort restore. Tau marker movement is a visual overlay only. Raw coordinate click/scroll requires physical_input=true. When app is supplied, x/y are app-window coordinates unless coordinate_space=screen. This exposes UI structure and explicit input events, not private app APIs or image understanding.".to_string(),
+            description: "Inspect and control visible macOS apps through accessibility: list_apps, focus_app, get_app_state, click, scroll, drag, move_tau, type_text, paste_text, press_key, set_value, mark_app, and show_tau. focus_app shows the tau marker, binds computer_use to that focused app window, and keeps the marker visible until the computer-use turn ends. Input and get_app_state actions default to the locked focus_app window when app is omitted, and input requires that locked window to remain frontmost. If the user changes focus, input is blocked and the focus lock is revoked for the rest of the turn instead of re-focusing. paste_text uses the clipboard with best-effort restore. Tau marker movement is a visual overlay only. click requires element_index from get_app_state; raw coordinate mouse clicks and scrolls are disabled. This exposes UI structure and explicit input events, not private app APIs or image understanding.".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -67,16 +66,16 @@ impl Tool for ComputerUseTool {
                     },
                     "x": {
                         "type": "integer",
-                        "description": "X coordinate for physical_input click/scroll or show_tau. For click/scroll with app supplied, defaults to app-window-relative coordinates."
+                        "description": "X coordinate for show_tau. Raw coordinate pointer input is disabled."
                     },
                     "y": {
                         "type": "integer",
-                        "description": "Y coordinate for physical_input click/scroll or show_tau. For click/scroll with app supplied, defaults to app-window-relative coordinates."
+                        "description": "Y coordinate for show_tau. Raw coordinate pointer input is disabled."
                     },
                     "coordinate_space": {
                         "type": "string",
                         "enum": ["app", "screen"],
-                        "description": "Coordinate space for physical_input click/scroll x/y. Defaults to app when app is supplied, otherwise screen. Screen coordinates with app supplied must be inside that app window."
+                        "description": "Coordinate space for show_tau and validation. Raw coordinate pointer input is disabled."
                     },
                     "from_x": {
                         "type": "integer",
@@ -108,11 +107,11 @@ impl Tool for ComputerUseTool {
                     "button": {
                         "type": "string",
                         "enum": ["left", "right", "middle"],
-                        "description": "Mouse button for physical_input coordinate click. Element-index clicks use accessibility."
+                        "description": "Reserved for future pointer support. Element-index clicks use accessibility; raw coordinate clicks are disabled."
                     },
                     "physical_input": {
                         "type": "boolean",
-                        "description": "Required to send raw coordinate mouse or scroll events. Defaults to false. Raw coordinate input also requires a focus_app window lock. Prefer element_index click and visual-only move_tau/drag."
+                        "description": "Reserved for future pointer support. Raw coordinate pointer input is disabled; use element_index click, keyboard navigation, and visual-only move_tau/drag."
                     },
                     "direction": {
                         "type": "string",
@@ -184,10 +183,6 @@ impl Tool for ComputerUseTool {
             "click" => {
                 let requested_app = args.optional_app();
                 let click_count = args.click_count.unwrap_or(1).clamp(1, 10);
-                let button = match args.pointer_button() {
-                    Ok(button) => button,
-                    Err(result) => return Ok(result),
-                };
                 if let Some(element_index) = args.element_index {
                     let app = match self
                         .input_app(requested_app, "click with element_index")
@@ -222,72 +217,20 @@ impl Tool for ComputerUseTool {
                         "click requires either element_index or both x and y",
                     ));
                 }
-                if !args.physical_input {
-                    return Ok(tool_error(
-                        "coordinate click sends real mouse events; set physical_input=true, or prefer element_index or focus_app",
-                    ));
-                }
                 if let Err(result) = args.coordinate_space(true) {
                     return Ok(result);
                 }
-                let app = match self.input_app(requested_app, "coordinate click").await {
-                    Ok(app) => app,
-                    Err(result) => return Ok(result),
-                };
-                let _expected_identity = match self.require_input_lock(&app).await? {
-                    Ok(identity) => identity,
-                    Err(result) => return Ok(result),
-                };
-                let point = match args.target_point(Some(&app), false, "click").await? {
-                    Ok(point) => point,
-                    Err(result) => return Ok(result),
-                };
-                self.run_marked_pointer(
-                    point,
-                    vec![
-                        "click".to_string(),
-                        point.x.to_string(),
-                        point.y.to_string(),
-                        click_count.to_string(),
-                        button,
-                    ],
-                )
-                .await
+                Ok(tool_error(
+                    "raw coordinate click is disabled; use click with element_index from get_app_state, or stop and report that the target is not exposed",
+                ))
             }
             "scroll" => {
-                let requested_app = args.optional_app();
-                let direction = match args.scroll_direction() {
-                    Ok(direction) => direction,
-                    Err(result) => return Ok(result),
-                };
-                if !args.physical_input {
-                    return Ok(tool_error(
-                        "scroll sends real scroll events; set physical_input=true after choosing a safe target",
-                    ));
+                if let Err(result) = args.scroll_direction() {
+                    return Ok(result);
                 }
-                let app = match self.input_app(requested_app, "scroll").await {
-                    Ok(app) => app,
-                    Err(result) => return Ok(result),
-                };
-                let _expected_identity = match self.require_input_lock(&app).await? {
-                    Ok(identity) => identity,
-                    Err(result) => return Ok(result),
-                };
-                let point = match args.target_point(Some(&app), true, "scroll").await? {
-                    Ok(point) => point,
-                    Err(result) => return Ok(result),
-                };
-                self.run_marked_pointer(
-                    point,
-                    vec![
-                        "scroll".to_string(),
-                        point.x.to_string(),
-                        point.y.to_string(),
-                        direction,
-                        args.scroll_pages().to_string(),
-                    ],
-                )
-                .await
+                Ok(tool_error(
+                    "raw coordinate scroll is disabled; use accessible elements, keyboard navigation, or stop and report that the target is not exposed",
+                ))
             }
             "drag" | "move_tau" => {
                 let (from, to) = match args.drag_points() {
@@ -602,14 +545,6 @@ impl ComputerUseArgs {
             .clamp(1, MAX_MARK_DURATION_MS)
     }
 
-    fn pointer_button(&self) -> anyhow::Result<String, ToolResult> {
-        let button = self.button.as_deref().unwrap_or("left");
-        match button {
-            "left" | "right" | "middle" => Ok(button.to_string()),
-            _ => Err(tool_error("click button must be left, right, or middle")),
-        }
-    }
-
     fn scroll_direction(&self) -> anyhow::Result<String, ToolResult> {
         let Some(direction) = self.direction.as_deref() else {
             return Err(tool_error("scroll requires direction"));
@@ -620,10 +555,6 @@ impl ComputerUseArgs {
                 "scroll direction must be up, down, left, or right",
             )),
         }
-    }
-
-    fn scroll_pages(&self) -> f64 {
-        self.pages.unwrap_or(1.0).clamp(0.1, MAX_SCROLL_PAGES)
     }
 
     fn coordinate_space(&self, has_app: bool) -> anyhow::Result<CoordinateSpace, ToolResult> {
@@ -1036,22 +967,6 @@ impl ComputerUseTool {
         Ok(Ok(lock.identity))
     }
 
-    async fn run_marked_pointer(
-        &self,
-        point: overlay::OverlayPoint,
-        pointer_args: Vec<String>,
-    ) -> anyhow::Result<ToolResult> {
-        let marker_result = self.show_session_tau(point).await?;
-        if marker_result.is_error {
-            return Ok(marker_result);
-        }
-        let pointer_result = run_pointer_action(pointer_args).await?;
-        if pointer_result.is_error {
-            return Ok(pointer_result);
-        }
-        Ok(join_tool_results(marker_result, pointer_result))
-    }
-
     async fn run_marked_ax_action(
         &self,
         point: overlay::OverlayPoint,
@@ -1109,39 +1024,6 @@ async fn run_action(args: Vec<String>) -> anyhow::Result<ToolResult> {
         .spawn()?;
     let mut stdin = child.stdin.take().expect("stdin piped");
     stdin.write_all(COMPUTER_USE_SCRIPT.as_bytes()).await?;
-    drop(stdin);
-
-    let output = child.wait_with_output().await?;
-    let is_error = !output.status.success();
-    let content = output_text(output.stdout, output.stderr, is_error);
-
-    Ok(ToolResult { content, is_error })
-}
-
-#[cfg(not(target_os = "macos"))]
-async fn run_pointer_action(_: Vec<String>) -> anyhow::Result<ToolResult> {
-    Ok(tool_error(
-        "computer_use pointer actions are only supported on macOS",
-    ))
-}
-
-#[cfg(target_os = "macos")]
-async fn run_pointer_action(args: Vec<String>) -> anyhow::Result<ToolResult> {
-    use std::process::Stdio;
-    use tokio::io::AsyncWriteExt;
-    use tokio::process::Command;
-
-    let mut child = Command::new("osascript")
-        .arg("-l")
-        .arg("JavaScript")
-        .arg("-")
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let mut stdin = child.stdin.take().expect("stdin piped");
-    stdin.write_all(POINTER_SCRIPT.as_bytes()).await?;
     drop(stdin);
 
     let output = child.wait_with_output().await?;
@@ -1634,86 +1516,6 @@ on setValueForIndex(elementRef, targetIndex, newValue, idx)
   end try
   return {false, i}
 end setValueForIndex
-"#;
-
-#[cfg(target_os = "macos")]
-const POINTER_SCRIPT: &str = r#"
-ObjC.import('CoreGraphics')
-ObjC.import('Foundation')
-
-function numberArg(argv, index, fallback) {
-  const parsed = Number(argv[index])
-  return Number.isFinite(parsed) ? parsed : fallback
-}
-
-function sleep(seconds) {
-  $.NSThread.sleepForTimeInterval(seconds)
-}
-
-function point(x, y) {
-  return $.CGPointMake(x, y)
-}
-
-function postMouse(eventType, x, y, button) {
-  const event = $.CGEventCreateMouseEvent(null, eventType, point(x, y), button)
-  $.CGEventPost($.kCGHIDEventTap, event)
-}
-
-function postScroll(x, y, direction, pages) {
-  const lines = Math.max(1, Math.round(pages * 10))
-  let vertical = 0
-  let horizontal = 0
-  if (direction === 'up') vertical = lines
-  if (direction === 'down') vertical = -lines
-  if (direction === 'left') horizontal = lines
-  if (direction === 'right') horizontal = -lines
-  const event = $.CGEventCreateScrollWheelEvent(null, $.kCGScrollEventUnitLine, 2, vertical, horizontal)
-  $.CGEventSetLocation(event, point(x, y))
-  $.CGEventPost($.kCGHIDEventTap, event)
-}
-
-function buttonSpec(buttonName) {
-  if (buttonName === 'right') {
-    return { button: $.kCGMouseButtonRight, down: $.kCGEventRightMouseDown, up: $.kCGEventRightMouseUp }
-  }
-  if (buttonName === 'middle') {
-    return { button: $.kCGMouseButtonCenter, down: $.kCGEventOtherMouseDown, up: $.kCGEventOtherMouseUp }
-  }
-  return { button: $.kCGMouseButtonLeft, down: $.kCGEventLeftMouseDown, up: $.kCGEventLeftMouseUp }
-}
-
-function clickAt(x, y, count, buttonName) {
-  const spec = buttonSpec(buttonName)
-  postMouse($.kCGEventMouseMoved, x, y, spec.button)
-  sleep(0.03)
-  for (let i = 0; i < count; i++) {
-    postMouse(spec.down, x, y, spec.button)
-    sleep(0.04)
-    postMouse(spec.up, x, y, spec.button)
-    sleep(0.05)
-  }
-}
-
-function run(argv) {
-  const actionName = argv[0]
-  if (actionName === 'click') {
-    const x = numberArg(argv, 1, 0)
-    const y = numberArg(argv, 2, 0)
-    const count = Math.max(1, Math.min(10, Math.round(numberArg(argv, 3, 1))))
-    const button = argv[4] || 'left'
-    clickAt(x, y, count, button)
-    return 'clicked at (' + x + ',' + y + ')'
-  }
-  if (actionName === 'scroll') {
-    const x = numberArg(argv, 1, 0)
-    const y = numberArg(argv, 2, 0)
-    const direction = argv[3] || 'down'
-    const pages = Math.max(0.1, Math.min(10, numberArg(argv, 4, 1)))
-    postScroll(x, y, direction, pages)
-    return 'scrolled ' + direction + ' at (' + x + ',' + y + ') by ' + pages + ' page(s)'
-  }
-  throw new Error('unknown pointer action: ' + actionName)
-}
 "#;
 
 #[cfg(test)]

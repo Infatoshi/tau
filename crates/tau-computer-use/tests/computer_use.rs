@@ -34,6 +34,9 @@ fn schema_exposes_core_actions() {
     assert!(schema.input_schema["properties"]["physical_input"].is_object());
     assert!(schema.input_schema["properties"]["coordinate_space"].is_object());
     assert!(schema.description.contains("visual overlay"));
+    assert!(schema
+        .description
+        .contains("raw coordinate mouse clicks and scrolls are disabled"));
     assert!(schema.description.contains("paste_text"));
     assert!(schema.description.contains("locked window"));
     assert!(schema.description.contains("frontmost"));
@@ -144,7 +147,7 @@ async fn coordinate_click_rejects_bad_coordinate_space_before_touching_os() {
 }
 
 #[tokio::test]
-async fn coordinate_click_requires_physical_input_before_touching_os() {
+async fn coordinate_click_is_disabled_before_touching_os() {
     let result = ComputerUseTool::default()
         .execute(
             json!({"action": "click", "x": 10, "y": 10}),
@@ -153,20 +156,45 @@ async fn coordinate_click_requires_physical_input_before_touching_os() {
         .await
         .unwrap();
     assert!(result.is_error);
-    assert!(result.content.contains("physical_input=true"));
+    assert!(result.content.contains("raw coordinate click is disabled"));
 }
 
 #[tokio::test]
-async fn app_coordinate_click_requires_physical_input_before_touching_os() {
+async fn app_coordinate_click_is_disabled_before_touching_os() {
     let result = ComputerUseTool::default()
         .execute(
-            json!({"action": "click", "app": "Finder", "x": 10, "y": 10}),
+            json!({
+                "action": "click",
+                "app": "Finder",
+                "x": 10,
+                "y": 10,
+                "physical_input": true
+            }),
             CancellationToken::new(),
         )
         .await
         .unwrap();
     assert!(result.is_error);
-    assert!(result.content.contains("physical_input=true"));
+    assert!(result.content.contains("raw coordinate click is disabled"));
+}
+
+#[tokio::test]
+async fn screen_coordinate_click_is_disabled_before_touching_os() {
+    let result = ComputerUseTool::default()
+        .execute(
+            json!({
+                "action": "click",
+                "coordinate_space": "screen",
+                "physical_input": true,
+                "x": 1290,
+                "y": 90
+            }),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(result.is_error);
+    assert!(result.content.contains("raw coordinate click is disabled"));
 }
 
 #[tokio::test]
@@ -183,7 +211,7 @@ async fn scroll_requires_direction_before_touching_os() {
 }
 
 #[tokio::test]
-async fn coordinate_scroll_requires_physical_input_before_touching_os() {
+async fn coordinate_scroll_is_disabled_before_touching_os() {
     let result = ComputerUseTool::default()
         .execute(
             json!({"action": "scroll", "direction": "down", "x": 10, "y": 10}),
@@ -192,11 +220,11 @@ async fn coordinate_scroll_requires_physical_input_before_touching_os() {
         .await
         .unwrap();
     assert!(result.is_error);
-    assert!(result.content.contains("physical_input=true"));
+    assert!(result.content.contains("raw coordinate scroll is disabled"));
 }
 
 #[tokio::test]
-async fn scroll_without_coordinates_requires_app_before_touching_os() {
+async fn physical_scroll_is_disabled_before_touching_os() {
     let result = ComputerUseTool::default()
         .execute(
             json!({"action": "scroll", "direction": "down", "physical_input": true}),
@@ -205,8 +233,7 @@ async fn scroll_without_coordinates_requires_app_before_touching_os() {
         .await
         .unwrap();
     assert!(result.is_error);
-    assert!(result.content.contains("requires app"));
-    assert!(result.content.contains("focus_app window lock"));
+    assert!(result.content.contains("raw coordinate scroll is disabled"));
 }
 
 #[tokio::test]
@@ -300,8 +327,10 @@ fn tau_marker_motion_is_linear_and_precedes_input() {
     assert!(!overlay.contains("TauComputerUseOverlayView"));
 
     let source = include_str!("../src/lib.rs");
-    assert!(source.contains("let marker_result = self.show_session_tau(point).await?;"));
-    assert!(source.contains("let pointer_result = run_pointer_action(pointer_args).await?;"));
+    assert!(!source.contains("run_pointer_action"));
+    assert!(!source.contains("POINTER_SCRIPT"));
+    assert!(!source.contains("CGEventCreateMouseEvent"));
+    assert!(!source.contains("CGEventCreateScrollWheelEvent"));
     assert!(!source.contains("tokio::join!(marker, pointer)"));
 }
 
