@@ -18,4 +18,8 @@ pub trait Tool: Send + Sync {
         input: Value,
         cancellation: CancellationToken,
     ) -> anyhow::Result<ToolResult>;
+
+    async fn cleanup(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }

@@ -1721,6 +1721,7 @@ dependencies = [
  "dotenvy",
  "serde",
  "serde_yaml",
+ "tau-computer-use",
  "tau-core",
  "tau-llm",
  "tau-providers",
@@ -1730,6 +1731,26 @@ dependencies = [
  "tokio-util",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "tau-computer-use"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tau-computer-use-layout",
+ "tau-core",
+ "tau-llm",
+ "tau-tools",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "tau-computer-use-layout"
+version = "0.1.0"
 
 [[package]]
 name = "tau-core"
@@ -1749,6 +1770,16 @@ dependencies = [
  "tracing",
  "unicode-width 0.2.0",
  "uuid",
+]
+
+[[package]]
+name = "tau-desktop-capture"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tau-computer-use-layout",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

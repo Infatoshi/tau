@@ -46,9 +46,9 @@ impl SandboxMode {
     pub fn description(self) -> &'static str {
         match self {
             Self::ReadOnly => {
-                "read is available; bash, edit, and write are blocked unless sandbox_mode = \"yolo\""
+                "read is available; risky tools are blocked unless sandbox_mode = \"yolo\""
             }
-            Self::Yolo => "read, bash, edit, and write are enabled without permission prompts",
+            Self::Yolo => "read and risky tools are enabled without permission prompts",
         }
     }
 }
@@ -82,6 +82,10 @@ where
             return Ok(errors::blocked_by_sandbox());
         }
         self.inner.execute(input, cancellation).await
+    }
+
+    async fn cleanup(&self) -> anyhow::Result<()> {
+        self.inner.cleanup().await
     }
 }
 

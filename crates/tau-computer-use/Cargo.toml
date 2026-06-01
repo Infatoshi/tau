@@ -1,0 +1,19 @@
+[package]
+name = "tau-computer-use"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tau-computer-use-layout = { path = "../tau-computer-use-layout" }
+tau-core = { path = "../tau-core" }
+tau-llm = { path = "../tau-llm" }
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+tau-tools = { path = "../tau-tools" }

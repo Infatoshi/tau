@@ -239,7 +239,7 @@ pub async fn list_recent(limit: usize) -> anyhow::Result<Vec<(String, DateTime<U
             });
         rows.push((hash, DateTime::<Utc>::from(modified), first_user));
     }
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    rows.sort_by_key(|row| std::cmp::Reverse(row.1));
     rows.truncate(limit);
     Ok(rows)
 }

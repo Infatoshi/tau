@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
+use tau_computer_use::ComputerUseTool;
 use tau_core::session::{list_recent, SessionEvent};
 use tau_core::{Agent, SessionStore, Tool};
 use tau_core::{AgentDisplay, StdoutDisplay};
@@ -20,7 +21,7 @@ mod errors;
 const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-5";
 const DEFAULT_OPENAI_RESPONSES_MODEL: &str = "gpt-5";
 const DEFAULT_OPENAI_CHAT_MODEL: &str = "gpt-4o";
-const DEFAULT_ZAI_MODEL: &str = "glm-5.1";
+const DEFAULT_ZAI_MODEL: &str = "glm-4.6v";
 const DEFAULT_KIMI_MODEL: &str = "kimi-k2.5";
 const DEFAULT_MINIMAX_MODEL: &str = "MiniMax-M2.7";
 const DEFAULT_DEEPSEEK_MODEL: &str = "deepseek-v4-flash";
@@ -369,6 +370,14 @@ Sandbox mode: {} ({})\n\
 Current working directory: {}\n\
 Current date: {}\n\
 Available tools:\n{}\n\
+Tool use policy:\n\
+- Use computer_use, not bash or ad hoc osascript, for visible app UI inspection and GUI input. Use focus_app before any input action; it shows the tau marker, locks computer_use to that exact frontmost window, and keeps the marker visible until the computer-use turn ends. If the user changes focus, input actions will be blocked instead of re-focusing.\n\
+- For visual demos, use show_tau or linear move_tau. Do not use physical_input=true unless the user explicitly asked for a real click or scroll.\n\
+- Prefer element_index click after get_app_state over raw coordinate click. If app is supplied with raw coordinates, x/y are app-window-relative unless coordinate_space=screen. Use press_key for app keyboard navigation when the user permits it. Never use drag for real mouse dragging; tau drag is visual-only marker motion.\n\
+- For browser navigation, use command+l, paste_text the full URL, press Return, then verify the address bar URL from get_app_state; title text or page text alone is not enough. If the requested URL redirects, report the final URL exactly. If a navigation confirmation appears, choose the obvious Leave/Continue action only when the user asked to navigate away.\n\
+- If focus_app or an input action is blocked because the frontmost window changed, stop and report the blocker instead of retrying or re-focusing.\n\
+- For Slack or Discord channel/DM navigation, if get_app_state cannot expose the target, use focus_app, app quick switcher (command+k), type the target name, press Return, then verify with get_app_state. Do not fall back to raw coordinates.\n\
+- If computer_use cannot expose or identify a GUI target, stop and explain the uncertainty instead of guessing coordinates or hidden shortcuts.\n\
 Be direct about this runtime context when asked. You may echo provider, model, harness, sandbox, cwd, and tool details to the user; do not pretend those details are hidden.",
         model,
         kind.name(),
@@ -420,6 +429,10 @@ fn default_tools(cwd: &Path, sandbox_mode: SandboxMode) -> Vec<Arc<dyn Tool>> {
         )),
         Arc::new(PermissionedTool::new(
             WriteTool::new(cwd.to_path_buf()),
+            sandbox_mode,
+        )),
+        Arc::new(PermissionedTool::new(
+            ComputerUseTool::default(),
             sandbox_mode,
         )),
     ]

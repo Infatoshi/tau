@@ -8,6 +8,9 @@
 - `crates/tau-providers`: provider adapters and provider-specific protocol conversion.
 - `crates/tau-core`: agent loop, display formatting, session JSONL storage, tool trait.
 - `crates/tau-tools`: concrete local tools: `read`, `bash`, `edit`, `write`.
+- `crates/tau-computer-use-layout`: shared screen coordinates, frames, and layout parsing.
+- `crates/tau-desktop-capture`: desktop screenshot capture boundary.
+- `crates/tau-computer-use`: macOS accessibility-backed `computer_use` tool, plus its tau marker visual helper.
 - `crates/tau-tui`: ratatui frontend.
 - `crates/tau-cli`: CLI entrypoint, config, provider/tool wiring, REPL/TUI glue.
 
@@ -51,11 +54,11 @@ On first run tau creates `~/.tau/config.yaml`. YAML is the only supported config
 
 ```yaml
 provider: zai
-default_model: glm-5.1
+default_model: glm-4.6v
 sandbox_mode: yolo
 ```
 
-CLI flags override config values. `sandbox_mode = "yolo"` allows `bash`, `edit`, and `write`; other values keep those risky tools blocked. `read` remains available.
+CLI flags override config values. `sandbox_mode = "yolo"` allows `bash`, `edit`, `write`, and `computer_use`; other values keep those risky tools blocked. `read` remains available.
 
 API keys are read from exported shell environment variables, a project `.env`, or `~/.tau/.env`.
 
@@ -63,7 +66,7 @@ API keys are read from exported shell environment variables, a project `.env`, o
 
 Make tau easy to extend without making it clever.
 
-- Keep each new capability close to its owner crate. Provider behavior goes in `tau-providers`; tool behavior goes in `tau-tools`; display behavior goes in `tau-core/src/display`; CLI/config glue goes in `tau-cli`.
+- Keep each new capability close to its owner crate. Provider behavior goes in `tau-providers`; simple file/shell tool behavior goes in `tau-tools`; specialized OS/plugin-style tools get their own crate; display behavior goes in `tau-core/src/display`; CLI/config glue goes in `tau-cli`.
 - Prefer boring structs, enums, and helper functions over framework-like abstractions.
 - Add a file only when it creates a clear boundary. Good examples: `display/tables.rs`, provider adapters, crate-local `errors.rs`.
 - Keep error construction out of hot-path business logic when it starts to sprawl. Use the crate-local `errors.rs` pattern.
@@ -71,6 +74,11 @@ Make tau easy to extend without making it clever.
 - Every new provider needs a default model, base URL, env var rule, and at least parser/formatting coverage if it changes protocol shape.
 - Every new terminal format needs a small focused formatter and a regression test when practical.
 - Avoid hidden magic. If tau injects context, reads a file, loads a config, or enables a tool, the behavior should be discoverable in code and explainable to the model.
+- `computer_use` is macOS accessibility via `osascript` plus tightly gated CoreGraphics pointer events: UI trees plus focus-app/element-index click/type/paste/press-key/set-value, linear visual-only tau movement, and raw coordinate click/scroll only when `physical_input=true`. `focus_app` shows the tau marker, locks computer_use to that exact frontmost window, and keeps it visible until the computer-use turn ends. Input actions require the locked window to remain frontmost; if the user changes focus, input is blocked instead of re-focusing. When `app` is supplied, raw x/y are app-window-relative unless `coordinate_space=screen`, and screen coordinates must land inside that app frame. It is not screenshot understanding, OCR, or a private app API.
+- If `focus_app` or an input action is blocked because the frontmost window changed, stop and report the blocker instead of retrying or re-focusing.
+- For browser navigation, use `command+l`, `paste_text` the full URL, press Return, then verify the address bar URL from `get_app_state`; title text alone is not enough. If the requested URL redirects, report the final URL exactly.
+- For Slack/Discord channel or DM navigation, prefer `focus_app` plus the app quick switcher (`command+k`) and verify the resulting window title/state instead of guessing raw coordinates from a sparse tree.
+- Computer-use cursor visuals are tau marker helpers in `tau-computer-use`, not generated runtime assets.
 - Keep README tiny. Durable contributor detail belongs here; larger specs belong in `SPEC.md`.
 
 ## Provider Notes

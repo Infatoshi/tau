@@ -1,0 +1,11 @@
+[package]
+name = "tau-desktop-capture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tau-computer-use-layout = { path = "../tau-computer-use-layout" }
+tempfile.workspace = true
+tokio.workspace = true

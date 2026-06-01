@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="tau-rust" x1="22" y1="18" x2="42" y2="47" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe7ad"/>
+      <stop offset="0.28" stop-color="#ff9f42"/>
+      <stop offset="0.62" stop-color="#c54e22"/>
+      <stop offset="1" stop-color="#5c2115"/>
+    </linearGradient>
+    <linearGradient id="tau-shine" x1="22" y1="18" x2="38" y2="36" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff6cf" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#fff6cf" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="tau-glow" x="-2" y="-2" width="68" height="68" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#ff8a24" flood-opacity="0.72"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#ffd36c" flood-opacity="0.46"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#1f0b05" flood-opacity="0.54"/>
+    </filter>
+  </defs>
+  <g filter="url(#tau-glow)">
+    <text x="32" y="42" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="29" font-weight="700" stroke="#210a04" stroke-width="1.8" stroke-linejoin="round" fill="url(#tau-rust)">τ</text>
+    <text x="32" y="42" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="29" font-weight="700" fill="url(#tau-rust)">τ</text>
+    <text x="30" y="37" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="15" font-weight="700" fill="url(#tau-shine)">τ</text>
+  </g>
+</svg>

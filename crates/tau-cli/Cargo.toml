@@ -21,6 +21,7 @@ dotenvy.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 tau-core = { path = "../tau-core" }
+tau-computer-use = { path = "../tau-computer-use" }
 tau-llm = { path = "../tau-llm" }
 tau-providers = { path = "../tau-providers" }
 tau-tools = { path = "../tau-tools" }

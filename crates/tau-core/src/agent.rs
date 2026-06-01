@@ -77,6 +77,23 @@ impl Agent {
         display: &mut (dyn AgentDisplay + Send),
         cancellation: CancellationToken,
     ) -> anyhow::Result<()> {
+        let result = self
+            .continue_until_done_inner(session, display, cancellation)
+            .await;
+        let cleanup = self.cleanup_tools().await;
+        match (result, cleanup) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), _) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+        }
+    }
+
+    async fn continue_until_done_inner(
+        &mut self,
+        session: &mut SessionStore,
+        display: &mut (dyn AgentDisplay + Send),
+        cancellation: CancellationToken,
+    ) -> anyhow::Result<()> {
         loop {
             let tool_schemas = self.tools.values().map(|tool| tool.schema()).collect();
             let request = ProviderRequest {
@@ -190,6 +207,13 @@ impl Agent {
                 content: result_blocks,
             });
         }
+    }
+
+    async fn cleanup_tools(&self) -> anyhow::Result<()> {
+        for tool in self.tools.values() {
+            tool.cleanup().await?;
+        }
+        Ok(())
     }
 
     pub async fn compact_context(
