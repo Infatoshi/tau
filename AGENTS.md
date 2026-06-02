@@ -26,6 +26,7 @@ This repo started as a minimal harness and was hardened through live terminal de
 - The model should know its runtime context: provider, model, harness, sandbox mode, cwd, date, tools, and injected project instructions.
 - First-run setup should be boring: create `~/.tau/config.yaml`, read env keys from predictable places, and let `tau` run from anywhere after install.
 - The repo should feel like Rust all the way down. Prefer Rust binaries over shell scripts when the behavior belongs to tau itself.
+- Computer use is high-trust by design: observe a target, ground the action in a real element or locked app state, act, verify, and fail closed when the target is not exposed.
 
 Do not undo these decisions casually. If a change cuts across them, leave a short note in this file explaining the new rule.
 
@@ -74,7 +75,8 @@ Make tau easy to extend without making it clever.
 - Every new provider needs a default model, base URL, env var rule, and at least parser/formatting coverage if it changes protocol shape.
 - Every new terminal format needs a small focused formatter and a regression test when practical.
 - Avoid hidden magic. If tau injects context, reads a file, loads a config, or enables a tool, the behavior should be discoverable in code and explainable to the model.
-- `computer_use` is macOS accessibility via `osascript` plus tightly gated CoreGraphics pointer events: UI trees plus focus-app/element-index click/type/paste/press-key/set-value, linear visual-only tau movement, and raw coordinate click/scroll only when `physical_input=true`. `focus_app` shows the tau marker, locks computer_use to that exact frontmost window, and keeps it visible until the computer-use turn ends. Input actions require the locked window to remain frontmost; if the user changes focus, input is blocked instead of re-focusing. When `app` is supplied, raw x/y are app-window-relative unless `coordinate_space=screen`, and screen coordinates must land inside that app frame. It is not screenshot understanding, OCR, or a private app API.
+- `computer_use` is macOS accessibility via `osascript`: UI trees plus focus-app/element-index click/type/paste/press-key/set-value, linear visual-only tau movement, and a persistent tau marker. `focus_app` shows the tau marker, locks computer_use to that exact frontmost window, and keeps it visible until the computer-use turn ends. Input actions require the locked window to remain frontmost; if the user changes focus, input is blocked and the focus lock is revoked for the turn instead of re-focusing. It is not screenshot understanding, OCR, raw pointer automation, or a private app API.
+- Raw coordinate mouse clicks and scrolls are disabled. If `get_app_state` does not expose the target element, stop and report the limitation instead of guessing coordinates, scrolling around, or clicking browser chrome.
 - If `focus_app` or an input action is blocked because the frontmost window changed, stop and report the blocker instead of retrying or re-focusing.
 - For browser navigation, use `command+l`, `paste_text` the full URL, press Return, then verify the address bar URL from `get_app_state`; title text alone is not enough. If the requested URL redirects, report the final URL exactly.
 - For Slack/Discord channel or DM navigation, prefer `focus_app` plus the app quick switcher (`command+k`) and verify the resulting window title/state instead of guessing raw coordinates from a sparse tree.

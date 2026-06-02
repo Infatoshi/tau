@@ -4,6 +4,8 @@
 
 minimal rust coding-agent harness
 
+computer use is intentionally high-trust: tau acts on grounded accessibility targets, verifies outcomes, and fails closed instead of guessing screen coordinates.
+
 ## install
 
 ```sh
